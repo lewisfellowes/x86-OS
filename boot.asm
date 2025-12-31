@@ -1,11 +1,12 @@
 org 0x7C00
 bits 16
 
-STAGE2_LOAD_ADDR equ 0x8000
-KERNEL_LOAD_ADDR equ 0x1000
+STAGE2_LOAD_ADDR    equ 0x8000
+KERNEL_ELF_ADDR     equ 0x9000
+KERNEL_LOAD_ADDR    equ 0x1000
 
-STAGE2_SECTORS   equ 4
-KERNEL_SECTORS   equ 4
+STAGE2_SECTORS      equ 4
+KERNEL_SECTORS      equ 32
 
 start:
     cli
@@ -25,8 +26,8 @@ start:
     mov di, STAGE2_SECTORS
     call read_sectors
 
-    ; --- Load Kernel from LBA (1 + STAGE2_SECTORS) into 0000:1000 ---
-    mov bx, KERNEL_LOAD_ADDR
+    ; --- Load Kernel ELF blob from LBA (1 + STAGE2_SECTORS) into 0000:9000 ---
+    mov bx, KERNEL_ELF_ADDR
     mov dword [lba_low], 1 + STAGE2_SECTORS
     mov dword [lba_high], 0
     mov di, KERNEL_SECTORS
