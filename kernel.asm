@@ -33,18 +33,16 @@ _start:
     call vga_print
 
     ; Trigger an invalid opcode exception to prove the IDT works
-    ud2
-    ;jmp $
-
-    ; If we get here, the ISR returned successfully
-    mov edi, 0xB8000 + (80*15*2)
-    mov esi, msg_after
-    mov bl, 0x0F
-    call vga_print
+    ; We will now comment out ud2 and halt after exception
+    ; ud2 ; This line is no longer needed
 
 .hang:
+    cli
+
+.hlt:
     hlt
-    jmp .hang
+    jmp .hlt
+
 
 ; -----------------------
 ; IDT setup
@@ -136,21 +134,12 @@ isr_common:
     cli
     pushad
 
-    ; frame base (after pushad)
     lea esi, [esp + 32]        ; ESI = &vector
-
-    ; ---- ADD THIS BLOCK RIGHT HERE ----
-    ; If this is #UD (vector 6), skip the UD2 instruction (2 bytes)
     cmp dword [esi + 0], 6     ; vector
     jne .no_skip
     add dword [esi + 8], 2     ; saved EIP += 2  (EIP is at +8)
-.no_skip:
-    ; ---- END ADD ----
 
-    ; --- debug dump S0..S4 (optional) ---
-    mov edi, 0xB8000 + (80*15*2)
-    mov ebx, esi
-    call dump_stack5_ptr_ebx
+.no_skip:
 
     ; Load vector+error for show_exception
     mov eax, [esi + 0]         ; vector
@@ -163,26 +152,11 @@ isr_common:
     mov eax, [esi + 8]         ; eip
     mov edx, [esi + 12]        ; cs
     mov ecx, [esi + 16]        ; eflags
-    call print_frame
 
     pop ebx
     pop eax
 
-    call show_exception
-
     popad
-
-    ; Now clean the stack so IRETD sees only [eip][cs][eflags]
-    ; For UD: stack currently has [vector][error][eip][cs][eflags] -> drop 8
-    ; For GP/PF: stack currently has [vector][error][eip][cs][eflags] -> drop 4 (vector)?? NO:
-    ; In GP/PF case, CPU error is present, so we must drop ONLY vector (4),
-    ; leaving [error][eip][cs][eflags] for IRETD? Wrong: IRETD expects [eip][cs][eflags] ONLY.
-    ; Therefore GP/PF must also drop the error code (4) before IRETD.
-    ;
-    ; So: if this exception had a real CPU error code, we must drop vector+error (8)
-    ; if it had a fake error code (UD), we also drop vector+error (8)
-    ;
-    ; => ALWAYS drop 8 here.
     add esp, 8
     iretd
 
@@ -467,43 +441,27 @@ print_frame:
     ret
 
 section .rodata
-dbg_s0      db " S0=",0
-dbg_s1      db " S1=",0
+msg_boot            db "Kernel @ 1MB: boot OK", 0
+msg_idt_loaded      db "IDT loaded. Triggering UD2...", 0
+msg_after           db "Returned from #UD successfully!", 0
+msg_vec             db "V=0x", 0
+msg_unknown         db "Unknown exception", 0
+msg_ud              db "#UD Invalid Opcode (vector 6)", 0
+msg_gp              db "#GP General Protection Fault (vector 13)", 0
+msg_pf              db "#PF Page Fault (vector 14)", 0
+msg_eip             db "EIP=0x", 0
+msg_cs2             db "CS =0x", 0
+msg_fl              db "FL =0x", 0
+
+; The `s*` variables represent debug text identifiers.
 s0          db " S0=",0
 s1          db " S1=",0
 s2          db " S2=",0
 s3          db " S3=",0
 s4          db " S4=",0
 
-msg_cr0 db "CR0=0x",0
-msg_gdt db "GDTR.base=0x",0
-msg_idt db "IDTR.base=0x",0
-msg_lim db " lim=0x",0
-
-msg_eip db "EIP=0x",0
-msg_cs2 db "CS =0x",0
-msg_fl  db "FL =0x",0
-
-msg_vec     db "V=0x", 0
-msg_cs      db "CS=0x", 0
-
-msg_boot            db "Kernel @ 1MB: boot OK", 0
-msg_idt_loaded      db "IDT loaded. Triggering UD2...", 0
-msg_exc             db "EXCEPTION CAUGHT:", 0
-msg_ud              db "#UD Invalid Opcode (vector 6)", 0
-msg_gp              db "#GP General Protection Fault (vector 13)", 0
-msg_pf              db "#PF Page Fault (vector 14)", 0
-msg_after           db "Returned from #UD successfully!", 0
-msg_unknown         db "Unknown exception", 0
-
 section .data
-gdtr_tmp: times 6 db 0
-idtr_tmp: times 6 db 0
-
-align 8
-idt:
-    times IDT_SIZE db 0
-
-idtr:
-    dw IDT_SIZE - 1
-    dd idt
+    align 8
+    idt:    times IDT_SIZE db 0            ; Define the IDT with 256 entries
+    idtr:   dw IDT_SIZE - 1
+            dd idt                         ; IDTR points to the start of the IDT

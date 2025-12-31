@@ -55,15 +55,6 @@ pm_start:
     ; Read entry point into EBX
     mov ebx, dword [ELF_BASE + 0x18]  ; e_entry
 
-    ; Print entry point (debug)
-    push ebx
-    mov edi, 0xB8000 + (80*20*2)
-    mov bl, 0x0E
-    mov esi, msg_en
-    call vga_print
-    pop eax
-    call vga_print_hex32
-
     ; Program header pointer = ELF_BASE + e_phoff
     mov esi, dword [ELF_BASE + 0x1C]
     add esi, ELF_BASE
@@ -92,36 +83,6 @@ ph_loop:
     ; filesz, memsz
     mov ebp, dword [esi + 0x10]       ; p_filesz
     mov edx, dword [esi + 0x14]       ; p_memsz
-
-    ; Debug-print first PT_LOAD only (preserve ESI/ECX/etc)
-    cmp dword [printed_first], 0
-    jne .skip_dbg
-    mov dword [printed_first], 1
-
-    push esi
-    push ecx
-    push eax
-    push edi
-    push ebp
-
-    mov edi, 0xB8000 + (80*21*2)
-    mov bl, 0x0E
-    mov esi, msg_pa
-    call vga_print
-    mov eax, [esp + 4]        ; saved dst (p_paddr)
-    call vga_print_hex32
-
-    mov esi, msg_sz
-    call vga_print
-    mov eax, [esp + 0]        ; saved filesz
-    call vga_print_hex32
-
-    pop ebp
-    pop edi
-    pop eax
-    pop ecx
-    pop esi
-.skip_dbg:
 
     ; Copy p_filesz bytes: [src] -> [dst]
     push esi
@@ -216,9 +177,6 @@ printed_first  dd 0
 
 section .rodata
 msg_s2       db "S2",0
-msg_en       db "EN=0x",0
-msg_pa       db " PA=0x",0
-msg_sz       db " SZ=0x",0
 msg_elf_fail db "ELF FAIL",0
 
 section .data
