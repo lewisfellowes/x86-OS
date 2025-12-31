@@ -21,4 +21,4 @@ _start:
     jmp .hang
 
 section .rodata
-msg db "Hello from ELF-built kernel (loaded as flat bin)!", 0
+msg db "Kernel running at 1MB (ELF loaded by Stage2)!", 0

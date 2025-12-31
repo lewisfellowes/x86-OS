@@ -18,6 +18,7 @@ start:
     sti
 
     mov [boot_drive], dl
+    call enable_a20
 
     ; --- Load Stage2 from LBA 1 into 0000:8000 ---
     mov bx, STAGE2_LOAD_ADDR
@@ -145,6 +146,16 @@ pm_entry:
 
     ; Jump to Stage2 (loaded at physical 0x8000)
     jmp STAGE2_LOAD_ADDR
+
+; -----------------------------
+; Enable A20 (fast A20 via port 0x92)
+; -----------------------------
+enable_a20:
+    in   al, 0x92
+    or   al, 00000010b      ; set A20 enable bit
+    and  al, 11111110b      ; clear reset bit (safety)
+    out  0x92, al
+    ret
 
 ; -----------------------------
 ; GDT (flat)
