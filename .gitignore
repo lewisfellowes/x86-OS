@@ -1,0 +1,39 @@
+# Build output
+build/
+out/
+dist/
+
+# Binary artifacts
+*.bin
+*.img
+*.iso
+*.elf
+*.o
+*.a
+
+# Debugging / dumps
+*.map
+*.lst
+*.sym
+*.log
+core
+core.*
+
+# Temporary / editor files
+*~
+*.swp
+*.swo
+*.tmp
+
+# IDE / editor configs
+.vscode/
+.idea/
+*.code-workspace
+
+# OS-specific junk
+.DS_Store
+Thumbs.db
+
+# QEMU / emulator leftovers
+*.pid
+*.lock
