@@ -32,7 +32,7 @@ VGA text memory.
 
 ---
 
-On Ubuntu / Debian-based systems:
+# On Ubuntu / Debian-based systems:
 ```bash
 sudo apt install nasm qemu-system-x86 make
 ```
@@ -42,26 +42,26 @@ Build
 make
 ```
 
-This creates a raw disk image at:
+## This creates a raw disk image at:
 
 ```bash
 build/os.img
 ```
 
 
-#Run
-##Boot as hard disk
+# Run
+## Boot as hard disk
 ```bash
 make run-hdd
 ```
 
-##Boot as floppy
+## Boot as floppy
 ```bash
 make run-fdd
 ```
 
 
-#Both should display:
+# Both should display:
 ```bash
 Hello from 32-bit protected mode!
 ```
