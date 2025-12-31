@@ -1,7 +1,7 @@
 ASM=nasm
 BUILD=build
 
-STAGE2_SECTORS=4
+STAGE2_SECTORS=1
 
 all: $(BUILD)/os.img
 
@@ -23,7 +23,7 @@ $(BUILD)/kernel.elf: $(BUILD)/kernel.o linker.ld | $(BUILD)
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf | $(BUILD)
 	objcopy -O binary $(BUILD)/kernel.elf $(BUILD)/kernel.bin
 
-$(BUILD)/os.img: $(BUILD)/boot.bin $(BUILD)/stage2.bin $(BUILD)/kernel.bin
+$(BUILD)/os.img: $(BUILD)/boot.bin $(BUILD)/stage2.bin $(BUILD)/kernel.elf
 	dd if=/dev/zero of=$(BUILD)/os.img bs=512 count=2880 status=none
 	dd if=$(BUILD)/boot.bin   of=$(BUILD)/os.img conv=notrunc status=none
 	dd if=$(BUILD)/stage2.bin of=$(BUILD)/os.img bs=512 seek=1 conv=notrunc status=none

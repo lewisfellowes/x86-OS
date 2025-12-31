@@ -5,7 +5,7 @@ STAGE2_LOAD_ADDR    equ 0x8000
 KERNEL_ELF_ADDR     equ 0x9000
 KERNEL_LOAD_ADDR    equ 0x1000
 
-STAGE2_SECTORS      equ 4
+STAGE2_SECTORS      equ 1
 KERNEL_SECTORS      equ 32
 
 start:
@@ -55,7 +55,7 @@ start:
 ;   BX = destination offset (segment = 0000)
 ;   DI = number of sectors to read
 ;   [lba_low/high] = starting LBA
-; Uses LBA (int13h ext) when available; CHS fallback for floppy.
+; Uses LBA (int13h ext) when available; CHS fallback.
 ; ---------------------------------------------------------
 read_sectors:
     push ax
@@ -64,6 +64,7 @@ read_sectors:
     push dx
     push si
     push di
+    push es
 
     mov [dest_off], bx          ; save destination offset
 
@@ -79,44 +80,53 @@ read_sectors:
     jz .chs
 
     ; ---- LBA read (AH=42h) ----
-    mov word [dap + 2], di
+    mov word [dap + 2], di          ; blocks to read
     mov bx, [dest_off]
-    mov word [dap + 4], bx
-    mov word [dap + 6], 0x0000
+    mov word [dap + 4], bx          ; offset
+    mov word [dap + 6], 0x0000      ; segment
 
     mov eax, [lba_low]
     mov [dap + 8], eax
     mov eax, [lba_high]
     mov [dap + 12], eax
 
-    mov si, dap
+    mov si, dap                     ; DS is 0, so DS:SI is fine
     mov ah, 0x42
     mov dl, [boot_drive]
+
+    mov cx, 3                       ; retry count
+.lba_retry:
     int 0x13
-    jc disk_error
-    jmp .ok
+    jnc .ok
+    dec cx
+    jnz .lba_retry
+    jmp disk_error
 
 .chs:
     ; ---- CHS fallback with retries ----
     ; Assumes cylinder 0, head 0, sector = LBA + 1
-    mov bx, [dest_off]
-    mov ax, 0x0000
+    xor ax, ax
     mov es, ax
+    mov bx, [dest_off]
 
-    mov si, 3                  ; retry count
-
-.retry:
-    mov ax, di                 ; AX = DI (AL = count)
-    mov ah, 0x02               ; AH = read sectors (set AFTER)
-    mov ch, 0x00               ; cylinder
-    mov dh, 0x00               ; head
+    mov cx, 3                       ; retry count
+.chs_retry:
+    mov ax, di                      ; AL = sector count
+    mov ah, 0x02                    ; BIOS read sectors
+    mov ch, 0x00                    ; cylinder
+    mov dh, 0x00                    ; head
     mov dl, [boot_drive]
     mov cl, byte [lba_low]
-    inc cl                     ; sector = LBA + 1
+    inc cl                          ; sector number = LBA + 1
     int 0x13
     jnc .ok
 
+    dec cx
+    jnz .chs_retry
+    jmp disk_error
+
 .ok:
+    pop es
     pop di
     pop si
     pop dx
@@ -130,7 +140,9 @@ disk_error:
     mov al, '!'
     xor bh, bh
     int 0x10
+.hang:
     hlt
+    jmp .hang
 
 ; -----------------------------
 ; 32-bit protected mode entry

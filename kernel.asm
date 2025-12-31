@@ -20,7 +20,7 @@ _start:
     ; Print a boot message (row 2)
     mov edi, 0xB8000 + (80*2*2)
     mov esi, msg_boot
-    mov ah, 0x0F
+    mov bl, 0x0F
     call vga_print
 
     ; Init IDT and load it
@@ -29,11 +29,18 @@ _start:
     ; Print confirmation (row 3)
     mov edi, 0xB8000 + (80*3*2)
     mov esi, msg_idt_loaded
-    mov ah, 0x0F
+    mov bl, 0x0F
     call vga_print
 
     ; Trigger an invalid opcode exception to prove the IDT works
     ud2
+    ;jmp $
+
+    ; If we get here, the ISR returned successfully
+    mov edi, 0xB8000 + (80*15*2)
+    mov esi, msg_after
+    mov bl, 0x0F
+    call vga_print
 
 .hang:
     hlt
@@ -101,103 +108,104 @@ idt_set_gate:
     ret
 
 ; -----------------------
-; ISR stubs
-; Normalize stack so common handler sees:
-;   [vector, error_code, eip, cs, eflags]
+; ISR stubs (standard layout)
+; After stub pushes, stack is:
+;   [vector] [error] [eip] [cs] [eflags]
 ; -----------------------
 
-; #UD - no error code
+; #UD - no CPU error code
 isr6:
-    push dword 0        ; error code (fake)
-    push dword 6        ; vector
+    push dword 0          ; error
+    push dword 6          ; vector
     jmp isr_common
 
-; #GP - has error code already pushed by CPU
+; #GP - CPU pushes error code already
+; CPU: [err][eip][cs][eflags]
 isr13:
-    push dword 13       ; vector
+    push dword 13         ; vector
     jmp isr_common
 
-; #PF - has error code already pushed by CPU
+; #PF - CPU pushes error code already
 isr14:
-    push dword 14       ; vector
+    push dword 14         ; vector
     jmp isr_common
 
+; Common for ALL exceptions after the stub has ensured:
+;   [vector][error][eip][cs][eflags]
 isr_common:
     cli
-    cld
+    pushad
 
-    ; Row 8: CR0
-    mov edi, 0xB8000 + (80*8*2)
-    mov ah, 0x0E
-    mov esi, msg_cr0
-    call vga_print
-    mov bl, 0x0E
-    mov eax, cr0
-    call vga_print_hex32
+    ; frame base (after pushad)
+    lea esi, [esp + 32]        ; ESI = &vector
 
-    ; Row 9: CS selector (as 32-bit)
-    mov edi, 0xB8000 + (80*9*2)
-    mov ah, 0x0E
-    mov esi, msg_cs
-    call vga_print
-    mov bl, 0x0E
-    xor eax, eax
-    mov ax, cs
-    call vga_print_hex32
+    ; ---- ADD THIS BLOCK RIGHT HERE ----
+    ; If this is #UD (vector 6), skip the UD2 instruction (2 bytes)
+    cmp dword [esi + 0], 6     ; vector
+    jne .no_skip
+    add dword [esi + 8], 2     ; saved EIP += 2  (EIP is at +8)
+.no_skip:
+    ; ---- END ADD ----
 
-    ; Row 10: GDTR base/limit
-    sgdt [gdtr_tmp]
-    mov edi, 0xB8000 + (80*10*2)
-    mov ah, 0x0E
-    mov esi, msg_gdt
-    call vga_print
-    mov bl, 0x0E
-    mov eax, [gdtr_tmp + 2]     ; base
-    call vga_print_hex32
-    mov esi, msg_lim
-    call vga_print
-    xor eax, eax
-    mov ax, [gdtr_tmp + 0]      ; limit
-    call vga_print_hex32
+    ; --- debug dump S0..S4 (optional) ---
+    mov edi, 0xB8000 + (80*15*2)
+    mov ebx, esi
+    call dump_stack5_ptr_ebx
 
-    ; Row 11: IDTR base/limit
-    sidt [idtr_tmp]
-    mov edi, 0xB8000 + (80*11*2)
-    mov ah, 0x0E
-    mov esi, msg_idt
-    call vga_print
-    mov bl, 0x0E
-    mov eax, [idtr_tmp + 2]     ; base
-    call vga_print_hex32
-    mov esi, msg_lim
-    call vga_print
-    xor eax, eax
-    mov ax, [idtr_tmp + 0]      ; limit
-    call vga_print_hex32
+    ; Load vector+error for show_exception
+    mov eax, [esi + 0]         ; vector
+    mov ebx, [esi + 4]         ; error
 
-.halt:
-    hlt
-    jmp .halt
+    ; Print EIP/CS/EFLAGS without clobbering vector:
+    push eax
+    push ebx
+
+    mov eax, [esi + 8]         ; eip
+    mov edx, [esi + 12]        ; cs
+    mov ecx, [esi + 16]        ; eflags
+    call print_frame
+
+    pop ebx
+    pop eax
+
+    call show_exception
+
+    popad
+
+    ; Now clean the stack so IRETD sees only [eip][cs][eflags]
+    ; For UD: stack currently has [vector][error][eip][cs][eflags] -> drop 8
+    ; For GP/PF: stack currently has [vector][error][eip][cs][eflags] -> drop 4 (vector)?? NO:
+    ; In GP/PF case, CPU error is present, so we must drop ONLY vector (4),
+    ; leaving [error][eip][cs][eflags] for IRETD? Wrong: IRETD expects [eip][cs][eflags] ONLY.
+    ; Therefore GP/PF must also drop the error code (4) before IRETD.
+    ;
+    ; So: if this exception had a real CPU error code, we must drop vector+error (8)
+    ; if it had a fake error code (UD), we also drop vector+error (8)
+    ;
+    ; => ALWAYS drop 8 here.
+    add esp, 8
+    iretd
+
 
 ; -----------------------
 ; Exception display
-; eax = vector, ebx = error code (currently unused here)
+; IN:  EAX = vector
+;      EBX = error code (unused for now)
 ; -----------------------
 show_exception:
-    ; Print header on row 6
+    ; Row 6: "V=0x" + vector
     mov edi, 0xB8000 + (80*6*2)
-    mov ah, 0x0E
+    mov bl, 0x0E
 
-    ; "V=0x" then the vector
     push eax
     mov esi, msg_vec
     call vga_print
     pop eax
     call vga_print_hex32
 
-    ; Print friendly name on row 7
+    ; Row 7: friendly name
     mov edi, 0xB8000 + (80*7*2)
-    mov ah, 0x0E
+    mov bl, 0x0E
 
     cmp eax, 6
     je .ud
@@ -225,12 +233,11 @@ show_exception:
     call vga_print
     ret
 
-
 ; -----------------------
 ; VGA print routine
 ; IN:  EDI = destination in VGA memory
 ;      ESI = zero-terminated string
-;      AH  = attribute byte
+;      BL  = attribute byte
 ; OUT: EDI advanced
 ; -----------------------
 vga_print:
@@ -239,7 +246,7 @@ vga_print:
     test al, al
     jz .done
     mov [edi], al
-    mov [edi + 1], ah
+    mov [edi + 1], bl
     add edi, 2
     jmp .print
 .done:
@@ -248,28 +255,34 @@ vga_print:
 
 ; -----------------------
 ; Print a 32-bit value in EAX as 8 hex chars at [EDI]
-; IN:  EAX = value, EDI = destination, BL = attribute
-; OUT: EDI advanced by 16 bytes (8 chars * 2)
+; IN:  EAX = value
+;      EDI = destination
+;      BL  = attribute
+; OUT: EDI advanced by 16 bytes
 ; -----------------------
 vga_print_hex32:
     push eax
     push ecx
     push edx
 
+    mov edx, eax          ; working copy (so we don't care about AH etc)
     mov ecx, 8
+
 .hex_loop:
-    mov edx, eax
-    shr edx, 28
-    and edx, 0xF
-    add dl, '0'
-    cmp dl, '9'
+    mov eax, edx
+    shr eax, 28
+    and eax, 0xF
+
+    add al, '0'
+    cmp al, '9'
     jle .ok
-    add dl, 7
+    add al, 7             ; 'A' - '9' - 1
 .ok:
-    mov [edi], dl
+    mov [edi], al
     mov [edi + 1], bl
     add edi, 2
-    shl eax, 4
+
+    shl edx, 4
     loop .hex_loop
 
     pop edx
@@ -292,7 +305,6 @@ dump_stack4:
     mov bl, 0x0E
 
     mov edi, 0xB8000 + (80*8*2)
-    mov ah, 0x0E
 
     mov esi, s0
     call vga_print
@@ -368,41 +380,90 @@ dump_stack5:
 
 ; Dump 5 dwords from exception frame base in EBX:
 ;  S0=[EBX+0] S1=[EBX+4] S2=[EBX+8] S3=[EBX+12] S4=[EBX+16]
+; IN:  EDI = VGA destination (cursor)
+;      EBX = frame pointer
 dump_stack5_ptr_ebx:
     push eax
     push ebx
     push esi
+    push ebp
 
-    mov bl, 0x0E
+    mov ebp, ebx          ; frame pointer in EBP (do NOT touch EDI)
+    mov bl, 0x0E          ; VGA attribute
 
     mov esi, s0
     call vga_print
-    mov eax, [ebx + 0]
+    mov eax, [ebp + 0]
     call vga_print_hex32
 
     mov esi, s1
     call vga_print
-    mov eax, [ebx + 4]
+    mov eax, [ebp + 4]
     call vga_print_hex32
 
     mov esi, s2
     call vga_print
-    mov eax, [ebx + 8]
+    mov eax, [ebp + 8]
     call vga_print_hex32
 
     mov esi, s3
     call vga_print
-    mov eax, [ebx + 12]
+    mov eax, [ebp + 12]
     call vga_print_hex32
 
     mov esi, s4
     call vga_print
-    mov eax, [ebx + 16]
+    mov eax, [ebp + 16]
     call vga_print_hex32
 
+    pop ebp
     pop esi
     pop ebx
     pop eax
+    ret
+
+; Prints:
+;   EIP=0x........
+;   CS =0x........
+;   FL =0x........
+; IN: eax=eip, edx=cs, ecx=eflags
+print_frame:
+    push eax
+    push edx
+    push ecx
+
+    ; --- EIP ---
+    mov edi, 0xB8000 + (80*11*2)
+    mov bl, 0x0E
+    mov esi, msg_eip
+    call vga_print
+    pop ecx
+    pop edx
+    pop eax
+    call vga_print_hex32
+
+    ; --- CS ---
+    push eax
+    push edx
+    push ecx
+    mov edi, 0xB8000 + (80*12*2)
+    mov bl, 0x0E
+    mov esi, msg_cs2
+    call vga_print
+    pop ecx
+    pop edx
+    pop eax
+    mov eax, edx
+    call vga_print_hex32
+
+    ; --- FL ---
+    mov edi, 0xB8000 + (80*13*2)
+    mov bl, 0x0E
+    mov esi, msg_fl
+    call vga_print
+    mov eax, ecx
+    call vga_print_hex32
+
     ret
 
 section .rodata
@@ -419,16 +480,21 @@ msg_gdt db "GDTR.base=0x",0
 msg_idt db "IDTR.base=0x",0
 msg_lim db " lim=0x",0
 
+msg_eip db "EIP=0x",0
+msg_cs2 db "CS =0x",0
+msg_fl  db "FL =0x",0
+
 msg_vec     db "V=0x", 0
 msg_cs      db "CS=0x", 0
 
-msg_boot    db "Kernel @ 1MB: boot OK", 0
-msg_idt_loaded     db "IDT loaded. Triggering UD2...", 0
-msg_exc     db "EXCEPTION CAUGHT:", 0
-msg_ud      db "#UD Invalid Opcode (vector 6)", 0
-msg_gp      db "#GP General Protection Fault (vector 13)", 0
-msg_pf      db "#PF Page Fault (vector 14)", 0
-msg_unknown db "Unknown exception", 0
+msg_boot            db "Kernel @ 1MB: boot OK", 0
+msg_idt_loaded      db "IDT loaded. Triggering UD2...", 0
+msg_exc             db "EXCEPTION CAUGHT:", 0
+msg_ud              db "#UD Invalid Opcode (vector 6)", 0
+msg_gp              db "#GP General Protection Fault (vector 13)", 0
+msg_pf              db "#PF Page Fault (vector 14)", 0
+msg_after           db "Returned from #UD successfully!", 0
+msg_unknown         db "Unknown exception", 0
 
 section .data
 gdtr_tmp: times 6 db 0
