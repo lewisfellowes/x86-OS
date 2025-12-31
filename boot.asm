@@ -1,7 +1,10 @@
 org 0x7C00
 bits 16
 
+STAGE2_LOAD_ADDR equ 0x8000
 KERNEL_LOAD_ADDR equ 0x1000
+
+STAGE2_SECTORS   equ 4
 KERNEL_SECTORS   equ 4
 
 start:
@@ -15,45 +18,20 @@ start:
 
     mov [boot_drive], dl
 
-    ; Try INT 13h Extensions first (works for HDD)
-    mov ah, 0x41
-    mov bx, 0x55AA
-    mov dl, [boot_drive]
-    int 0x13
-    jc .chs_fallback
-    cmp bx, 0xAA55
-    jne .chs_fallback
-    test cx, 1                  ; bit0 = ext disk access functions (42h) supported
-    jz .chs_fallback
+    ; --- Load Stage2 from LBA 1 into 0000:8000 ---
+    mov bx, STAGE2_LOAD_ADDR
+    mov dword [lba_low], 1
+    mov dword [lba_high], 0
+    mov di, STAGE2_SECTORS
+    call read_sectors
 
-    ; ---- LBA read (AH=42h) ----
-    mov word [dap + 2], KERNEL_SECTORS
-    mov word [dap + 4], KERNEL_LOAD_ADDR
-    mov word [dap + 6], 0x0000
-    mov dword [dap + 8], 1      ; LBA 1 = sector after boot sector
-    mov dword [dap + 12], 0
-
-    mov si, dap
-    mov ah, 0x42
-    mov dl, [boot_drive]
-    int 0x13
-    jc disk_error
-    jmp short loaded_ok
-
-.chs_fallback:
-    ; ---- CHS read (AH=02h) ----
-    ; Read KERNEL_SECTORS starting at CHS 0/0/2 into 0000:1000
+    ; --- Load Kernel from LBA (1 + STAGE2_SECTORS) into 0000:1000 ---
     mov bx, KERNEL_LOAD_ADDR
-    mov ah, 0x02
-    mov al, KERNEL_SECTORS
-    mov ch, 0x00
-    mov cl, 0x02
-    mov dh, 0x00
-    mov dl, [boot_drive]
-    int 0x13
-    jc disk_error
+    mov dword [lba_low], 1 + STAGE2_SECTORS
+    mov dword [lba_high], 0
+    mov di, KERNEL_SECTORS
+    call read_sectors
 
-loaded_ok:
     ; Print '$' (real mode)
     mov ah, 0x0E
     mov al, '$'
@@ -67,6 +45,82 @@ loaded_ok:
     or eax, 1
     mov cr0, eax
     jmp CODE_SEL:pm_entry
+
+; ---------------------------------------------------------
+; read_sectors
+; Inputs:
+;   BX = destination offset (segment = 0000)
+;   DI = number of sectors to read
+;   [lba_low/high] = starting LBA
+; Uses LBA (int13h ext) when available; CHS fallback for floppy.
+; ---------------------------------------------------------
+read_sectors:
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+
+    mov [dest_off], bx          ; save destination offset
+
+    ; Check INT 13h extensions
+    mov ah, 0x41
+    mov bx, 0x55AA
+    mov dl, [boot_drive]
+    int 0x13
+    jc .chs
+    cmp bx, 0xAA55
+    jne .chs
+    test cx, 1
+    jz .chs
+
+    ; ---- LBA read (AH=42h) ----
+    mov word [dap + 2], di
+    mov bx, [dest_off]
+    mov word [dap + 4], bx
+    mov word [dap + 6], 0x0000
+
+    mov eax, [lba_low]
+    mov [dap + 8], eax
+    mov eax, [lba_high]
+    mov [dap + 12], eax
+
+    mov si, dap
+    mov ah, 0x42
+    mov dl, [boot_drive]
+    int 0x13
+    jc disk_error
+    jmp .ok
+
+.chs:
+    ; ---- CHS fallback with retries ----
+    ; Assumes cylinder 0, head 0, sector = LBA + 1
+    mov bx, [dest_off]
+    mov ax, 0x0000
+    mov es, ax
+
+    mov si, 3                  ; retry count
+
+.retry:
+    mov ax, di                 ; AX = DI (AL = count)
+    mov ah, 0x02               ; AH = read sectors (set AFTER)
+    mov ch, 0x00               ; cylinder
+    mov dh, 0x00               ; head
+    mov dl, [boot_drive]
+    mov cl, byte [lba_low]
+    inc cl                     ; sector = LBA + 1
+    int 0x13
+    jnc .ok
+
+.ok:
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
 
 disk_error:
     mov ah, 0x0E
@@ -88,11 +142,13 @@ pm_entry:
     mov ss, ax
     mov esp, 0x90000
 
-    jmp KERNEL_LOAD_ADDR
+    ; Jump to Stage2 (loaded at physical 0x8000)
+    jmp STAGE2_LOAD_ADDR
 
 ; -----------------------------
-; GDT
+; GDT (flat)
 ; -----------------------------
+bits 16
 align 8
 gdt:
     dq 0
@@ -109,14 +165,20 @@ DATA_SEL equ 0x10
 
 boot_drive db 0
 
-; Disk Address Packet (DAP)
+dest_off dw 0
+
+lba_low  dd 0
+lba_high dd 0
+
+; Disk Address Packet (DAP) for int13h AH=42h
 dap:
     db 0x10
     db 0x00
     dw 0
     dw 0
     dw 0
-    dq 0
+    dd 0
+    dd 0
 
 times 510 - ($ - $$) db 0
 dw 0xAA55
