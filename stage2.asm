@@ -1,4 +1,7 @@
 ; stage2.asm - 32-bit ELF32 loader (runs at 0x8000)
+; Bootloader enters protected mode and far-jumps here with CS=0x08.
+; Stage2 reloads its own GDT, reasserts PE=1, reloads segments, loads ELF, then retf to kernel.
+
 org 0x8000
 bits 32
 
@@ -6,6 +9,31 @@ ELF_BASE equ 0x9000
 PT_LOAD  equ 1
 
 start:
+    cli
+
+    ; Load our own known-good GDT (don’t rely on boot sector memory/state)
+    lgdt [gdt_desc]
+
+    ; Ensure Protected Mode is ON (PE=1). Safe even if already set.
+    mov eax, cr0
+    or eax, 1
+    mov cr0, eax
+
+    ; Far jump to flush prefetch + ensure CS is CODE_SEL using our GDT
+    jmp CODE_SEL:pm_start
+
+pm_start:
+    ; Reload data segments + stack
+    mov ax, DATA_SEL
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    mov ss, ax
+    mov esp, 0x90000
+
+    cld
+
     ; Clear screen
     mov edi, 0xB8000
     mov ecx, 80*25
@@ -77,8 +105,10 @@ next_ph:
     jmp ph_loop
 
 done:
-    ; Jump to ELF entry point
-    jmp ebx
+    ; Jump to ELF entry point (far, CS=0x08)
+    push dword CODE_SEL
+    push ebx
+    retf
 
 elf_fail:
     ; Print "EF" on row 1 if ELF parse fails
@@ -88,3 +118,20 @@ elf_fail:
     jmp .hang
 
 phentsize dd 0
+
+; -----------------------------
+; Stage2 GDT (flat 0..4GB)
+; -----------------------------
+align 8
+gdt:
+    dq 0
+    dq 0x00CF9A000000FFFF    ; code: base=0, limit=4GB, ring0, exec/read
+    dq 0x00CF92000000FFFF    ; data: base=0, limit=4GB, ring0, read/write
+
+gdt_desc:
+    dw gdt_end - gdt - 1
+    dd gdt
+gdt_end:
+
+CODE_SEL equ 0x08
+DATA_SEL equ 0x10

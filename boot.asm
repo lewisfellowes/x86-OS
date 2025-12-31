@@ -10,6 +10,7 @@ KERNEL_SECTORS      equ 32
 
 start:
     cli
+    cld
     xor ax, ax
     mov ds, ax
     mov es, ax
@@ -136,6 +137,7 @@ disk_error:
 ; -----------------------------
 bits 32
 pm_entry:
+    cld
     mov ax, DATA_SEL
     mov ds, ax
     mov es, ax
@@ -145,7 +147,7 @@ pm_entry:
     mov esp, 0x90000
 
     ; Jump to Stage2 (loaded at physical 0x8000)
-    jmp STAGE2_LOAD_ADDR
+    jmp CODE_SEL:STAGE2_LOAD_ADDR
 
 ; -----------------------------
 ; Enable A20 (fast A20 via port 0x92)
