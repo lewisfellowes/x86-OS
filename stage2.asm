@@ -2,11 +2,14 @@
 org 0x8000
 bits 32
 
-ELF_BASE equ 0x9000
-PT_LOAD  equ 1
+ELF_BASE      equ 0x9000
+PT_LOAD       equ 1
 
-CODE_SEL equ 0x08
-DATA_SEL equ 0x10
+CODE_SEL      equ 0x08
+DATA_SEL      equ 0x10
+
+; Must match boot.asm / kernel expectations
+BOOT_INFO_ADDR equ 0x6000
 
 start:
     cli
@@ -109,7 +112,9 @@ next_ph:
     jmp ph_loop
 
 done:
-    ; Jump to ELF entry point (far)
+    ; Jump to ELF entry point (far).
+    ; ABI: EAX = pointer to boot_info struct in low memory.
+    mov eax, BOOT_INFO_ADDR
     push dword CODE_SEL
     push ebx
     retf

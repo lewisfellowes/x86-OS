@@ -41,10 +41,10 @@ $(BUILD)/os.img: $(BUILD)/boot.bin $(BUILD)/stage2.bin $(BUILD)/kernel.elf
 
 
 run-hdd: $(BUILD)/os.img
-	qemu-system-i386 -drive format=raw,file=$(BUILD)/os.img,if=ide -boot c
+	qemu-system-i386 -drive format=raw,file=$(BUILD)/os.img,if=ide -boot c -serial stdio -no-reboot
 
 run-fdd: $(BUILD)/os.img
-	qemu-system-i386 -fda $(BUILD)/os.img -boot a
+	qemu-system-i386 -fda $(BUILD)/os.img -boot a -serial stdio -no-reboot
 
 clean:
 	rm -rf $(BUILD)

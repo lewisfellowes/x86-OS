@@ -1,12 +1,35 @@
 org 0x7C00
 bits 16
 
-STAGE2_LOAD_ADDR    equ 0x8000
-KERNEL_ELF_ADDR     equ 0x9000
-KERNEL_LOAD_ADDR    equ 0x1000
+; -----------------------------
+; Disk / loader layout
+; -----------------------------
+STAGE2_LOAD_ADDR     equ 0x8000
+KERNEL_ELF_ADDR      equ 0x9000
 
-STAGE2_SECTORS      equ 1
-KERNEL_SECTORS      equ 32
+STAGE2_SECTORS       equ 1
+KERNEL_SECTORS       equ 32
+
+; -----------------------------
+; Boot info + memory map layout
+; These live in low memory below 0x8000 so they survive
+; when we load stage2 at 0x8000 and the ELF blob at 0x9000.
+; -----------------------------
+BOOT_INFO_ADDR       equ 0x6000        ; physical address (avoid 0x5000 – BIOS can clobber it)
+E820_BUFFER_ADDR     equ 0x5100        ; start of E820 entry array
+E820_ENTRY_SIZE      equ 20            ; bytes per E820 entry (base,len,type)
+E820_MAX_ENTRIES     equ 32            ; hard cap to avoid overruns
+
+; boot_info struct layout (32-bit words unless noted)
+;   +0  : magic      (0x1BADB002 for now)
+;   +4  : version    (0x00000001)
+;   +8  : flags      (reserved, 0 for now)
+;   +12 : memmap_ptr (physical pointer to E820 array)
+;   +16 : memmap_len (number of valid E820 entries)
+;   +20 : boot_drive (BIOS DL as seen by MBR)
+;   +21 : _pad[3]    (padding / future fields)
+BOOTINFO_MAGIC       equ 0x1BADB002
+BOOTINFO_VERSION     equ 0x00000001
 
 start:
     cli
@@ -21,25 +44,67 @@ start:
     mov [boot_drive], dl
     call enable_a20
 
-    ; --- Load Stage2 from LBA 1 into 0000:8000 ---
+    ; Boot info at BOOT_INFO_ADDR – 16-bit writes only (safe in real mode)
+    xor ax, ax
+    mov ds, ax
+    mov bx, BOOT_INFO_ADDR
+    mov word [bx + 0], 0xB002          ; magic lo
+    mov word [bx + 2], 0x1BAD          ; magic hi
+    mov word [bx + 4], 1               ; version
+    mov word [bx + 6], 0
+    mov word [bx + 8], 0               ; flags
+    mov word [bx + 10], 0
+    mov word [bx + 12], 0              ; memmap_ptr
+    mov word [bx + 14], 0
+    mov word [bx + 16], 0              ; memmap_len
+    mov word [bx + 18], 0
+    mov al, [boot_drive]
+    mov [bx + 20], al
+    mov word [bx + 22], 0
+
+    ; ---- E820 memory map query ----
+    ; INT 15h EAX=E820h enumerates physical memory regions.
+    ; Each call fills one 20-byte entry at ES:DI; EBX is the
+    ; continuation token (0 = start / last).  EDX must be 'SMAP'.
+    xor ebx, ebx
+    xor bp, bp
+    mov di, E820_BUFFER_ADDR
+
+.e820_loop:
+    mov eax, 0x0000E820
+    mov cx, E820_ENTRY_SIZE
+    mov edx, 0x534D4150       ; 'SMAP'
+    int 0x15
+    jc .e820_end
+    cmp eax, 0x534D4150
+    jne .e820_end
+    inc bp
+    add di, E820_ENTRY_SIZE
+    cmp bp, E820_MAX_ENTRIES
+    jge .e820_end
+    test ebx, ebx
+    jnz .e820_loop
+
+.e820_end:
+    mov bx, BOOT_INFO_ADDR
+    mov word [bx + 12], E820_BUFFER_ADDR
+    mov word [bx + 14], 0
+    mov [bx + 16], bp
+    mov word [bx + 18], 0
+
+    ; Load Stage2 from LBA 1 into 0000:8000
     mov bx, STAGE2_LOAD_ADDR
     mov dword [lba_low], 1
     mov dword [lba_high], 0
     mov di, STAGE2_SECTORS
     call read_sectors
 
-    ; --- Load Kernel ELF blob from LBA (1 + STAGE2_SECTORS) into 0000:9000 ---
+    ; Load Kernel ELF from LBA 2 into 0000:9000
     mov bx, KERNEL_ELF_ADDR
     mov dword [lba_low], 1 + STAGE2_SECTORS
     mov dword [lba_high], 0
     mov di, KERNEL_SECTORS
     call read_sectors
-
-    ; Print '$' (real mode)
-    mov ah, 0x0E
-    mov al, '$'
-    xor bh, bh
-    int 0x10
 
     ; Enter protected mode
     cli
