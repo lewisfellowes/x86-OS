@@ -1,157 +1,65 @@
 [
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/apps/about.c",
-    "file": "kernel/apps/about.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/apps/calc.c",
-    "file": "kernel/apps/calc.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/apps/fileview.c",
-    "file": "kernel/apps/fileview.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/apps/terminal.c",
-    "file": "kernel/apps/terminal.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/arch/gdt.c",
-    "file": "kernel/arch/gdt.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/arch/idt.c",
-    "file": "kernel/arch/idt.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/arch/pic.c",
-    "file": "kernel/arch/pic.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/arch/pit.c",
-    "file": "kernel/arch/pit.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/drivers/ata.c",
-    "file": "kernel/drivers/ata.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/drivers/fb.c",
-    "file": "kernel/drivers/fb.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/drivers/kbd.c",
-    "file": "kernel/drivers/kbd.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/drivers/mouse.c",
-    "file": "kernel/drivers/mouse.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/drivers/serial.c",
-    "file": "kernel/drivers/serial.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/fs/myfs.c",
-    "file": "kernel/fs/myfs.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/gfx/cursor.c",
-    "file": "kernel/gfx/cursor.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/gfx/font.c",
-    "file": "kernel/gfx/font.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/gui/clock.c",
-    "file": "kernel/gui/clock.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/gui/compositor.c",
-    "file": "kernel/gui/compositor.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/gui/desktop.c",
-    "file": "kernel/gui/desktop.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/gui/event.c",
-    "file": "kernel/gui/event.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/gui/widget.c",
-    "file": "kernel/gui/widget.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/gui/window.c",
-    "file": "kernel/gui/window.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/gui/wm.c",
-    "file": "kernel/gui/wm.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/kmain.c",
-    "file": "kernel/kmain.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/lib/string.c",
-    "file": "kernel/lib/string.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/mem/heap.c",
-    "file": "kernel/mem/heap.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/mem/paging.c",
-    "file": "kernel/mem/paging.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/mem/pmm.c",
-    "file": "kernel/mem/pmm.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/proc/elf.c",
-    "file": "kernel/proc/elf.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/proc/process.c",
-    "file": "kernel/proc/process.c"
-  },
-  {
-    "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS",
-    "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/proc/syscall.c",
-    "file": "kernel/proc/syscall.c"
-  }
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/proc/process.c", "file": "kernel/proc/process.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/proc/syscall.c", "file": "kernel/proc/syscall.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/proc/elf.c", "file": "kernel/proc/elf.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/drivers/fb.c", "file": "kernel/drivers/fb.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/drivers/serial.c", "file": "kernel/drivers/serial.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/drivers/mouse.c", "file": "kernel/drivers/mouse.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/drivers/ata.c", "file": "kernel/drivers/ata.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/drivers/kbd.c", "file": "kernel/drivers/kbd.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/arch/pic.c", "file": "kernel/arch/pic.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/arch/gdt.c", "file": "kernel/arch/gdt.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/arch/idt.c", "file": "kernel/arch/idt.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/arch/pit.c", "file": "kernel/arch/pit.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/gui/desktop.c", "file": "kernel/gui/desktop.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/gui/clock.c", "file": "kernel/gui/clock.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/gui/wm.c", "file": "kernel/gui/wm.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/gui/event.c", "file": "kernel/gui/event.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/gui/widget.c", "file": "kernel/gui/widget.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/gui/compositor.c", "file": "kernel/gui/compositor.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/gui/window.c", "file": "kernel/gui/window.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/lib/string.c", "file": "kernel/lib/string.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/fs/myfs.c", "file": "kernel/fs/myfs.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/gfx/font.c", "file": "kernel/gfx/font.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/gfx/cursor.c", "file": "kernel/gfx/cursor.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/apps/fileview.c", "file": "kernel/apps/fileview.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/apps/terminal.c", "file": "kernel/apps/terminal.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/apps/calc.c", "file": "kernel/apps/calc.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/apps/about.c", "file": "kernel/apps/about.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/apps/editor.c", "file": "kernel/apps/editor.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/mem/pmm.c", "file": "kernel/mem/pmm.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/mem/paging.c", "file": "kernel/mem/paging.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/mem/heap.c", "file": "kernel/mem/heap.c" }
+  ,
+  { "directory": "/Users/lewisfellowes/VSCode/assembly/x86-OS", "command": "i686-elf-gcc -ffreestanding -O2 -Wall -Wextra -std=c11 -mno-sse -Ikernel -c kernel/kmain.c", "file": "kernel/kmain.c" }
 ]

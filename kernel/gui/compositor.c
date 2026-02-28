@@ -9,4 +9,5 @@ void compositor_init(void) {
 void compositor_redraw_all(void) {
     desktop_draw();
     wm_compose();
+    desktop_draw_start_menu();
 }

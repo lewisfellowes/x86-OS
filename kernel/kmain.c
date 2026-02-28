@@ -102,13 +102,17 @@ void kmain(boot_info_t *bi) {
         while (kbd_has_key()) {
             uint8_t sc = kbd_get_scancode();
             dirty = 1;
+            bool released = (sc & 0x80) != 0;
+            uint8_t raw = sc & 0x7F;
+            kbd_update_modifiers(raw, released);
+
             event_t ev;
-            if (sc & 0x80) {
+            if (released) {
                 ev.type = EVENT_KEY_UP;
-                ev.key.scancode = sc & 0x7F;
+                ev.key.scancode = raw;
             } else {
                 ev.type = EVENT_KEY_DOWN;
-                ev.key.scancode = sc;
+                ev.key.scancode = raw;
             }
             ev.key.ascii = kbd_scancode_to_ascii(ev.key.scancode);
             event_push(&ev);
@@ -137,9 +141,10 @@ void kmain(boot_info_t *bi) {
         if (needs_scene_redraw) {
             compositor_redraw_all();
             dirty = 1;
+        } else {
+            wm_compose();
         }
 
-        wm_compose();
         cursor_draw(ms->x, ms->y);
 
         /* Single

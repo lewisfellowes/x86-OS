@@ -1,6 +1,7 @@
 #include "gui/wm.h"
 #include "gui/widget.h"
 #include "drivers/fb.h"
+#include "drivers/kbd.h"
 #include "gfx/font.h"
 #include "lib/string.h"
 #include "drivers/serial.h"
@@ -117,7 +118,18 @@ void wm_handle_event(const event_t *ev) {
                         ev->mouse.y - drag_oy);
         }
     } else if (ev->type == EVENT_KEY_DOWN || ev->type == EVENT_KEY_UP) {
-        /* Route to focused window */
+        /* Alt+F4 closes focused window */
+        if (ev->type == EVENT_KEY_DOWN &&
+            ev->key.scancode == 0x3E &&
+            (kbd_get_modifiers() & KBD_MOD_ALT)) {
+            if (zcount > 0) {
+                window_t *top = zorder[zcount - 1];
+                wm_remove_window(top);
+                window_close(top);
+                return;
+            }
+        }
+
         if (zcount > 0 && zorder[zcount - 1]->on_event) {
             int t = (ev->type == EVENT_KEY_DOWN) ? WIN_EVENT_KEY_DOWN : WIN_EVENT_KEY_UP;
             zorder[zcount - 1]->on_event(zorder[zcount - 1], t,

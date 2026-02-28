@@ -6,8 +6,9 @@
 #define FS_MAX_FD     16
 #define FS_MAX_DIRENT 32
 
-#define FS_FLAG_READ  0x01
-#define FS_FLAG_WRITE 0x02
+#define FS_FLAG_READ   0x01
+#define FS_FLAG_WRITE  0x02
+#define FS_FLAG_CREATE 0x04
 
 typedef int fd_t;
 

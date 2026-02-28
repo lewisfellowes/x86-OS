@@ -2,8 +2,8 @@
 
 A 32-bit x86 operating system that boots from BIOS, featuring a modular
 freestanding C kernel, graphical desktop environment with a window manager,
-built-in applications, an on-disk filesystem, and a process/syscall model.
-Runs in QEMU.
+built-in applications, an on-disk filesystem with read/write support, and a
+process/syscall model. Runs in QEMU.
 
 ---
 
@@ -31,7 +31,7 @@ Runs in QEMU.
 - **IDT + ISRs** for CPU exceptions with diagnostic output
 - **8259A PIC** remapped to vectors 0x20-0x2F
 - **PIT timer** at 100 Hz (IRQ0) with global tick counter and `sleep_ms()`
-- **PS/2 keyboard** (IRQ1) with scancode ring buffer and ASCII translation
+- **PS/2 keyboard** (IRQ1) with scancode ring buffer, ASCII translation, and modifier key tracking (Shift/Ctrl/Alt)
 - **PS/2 mouse** (IRQ12) with 3-byte packet parsing
 - **Serial port** (COM1, 115200 8N1) for debug logging
 - **ATA PIO** disk driver with IDENTIFY, 28-bit LBA read/write for two IDE drives
@@ -40,7 +40,8 @@ Runs in QEMU.
 ### Filesystem
 - **MyFS** -- simple custom block-based on-disk filesystem
 - Superblock, bitmap allocator, flat directory with up to 32 files
-- VFS-like interface: `fs_open`, `fs_read`, `fs_write`, `fs_close`, `fs_stat`, `fs_readdir`
+- **Full read/write support** -- `fs_open`, `fs_read`, `fs_write`, `fs_close`, `fs_create`, `fs_stat`, `fs_readdir`
+- Block allocation with contiguous extension, bitmap tracking, directory and superblock flush to disk
 - Host-side `mkfs_myfs` tool to format and populate disk images
 - Sample files bundled from `rootfs/` directory
 
@@ -48,7 +49,8 @@ Runs in QEMU.
 - **Double-buffered rendering** -- all drawing targets a back buffer, single `fb_flip()` to LFB
 - **Bitmap font** rendering (VGA ROM 8x16) with transparent background support
 - **Desktop** with gradient wallpaper, taskbar, Start button, and live MM:SS clock
-- **Desktop icons** for launching applications (Terminal, Files, About, Calculator)
+- **Desktop icons** for launching applications (Terminal, Files, Editor, Calc, About)
+- **Start menu** popup with app launcher entries, toggled by Start button click
 - **Mouse cursor** (8x12 arrow) with background save/restore
 
 ### Window Manager
@@ -56,11 +58,13 @@ Runs in QEMU.
 - **Z-order management** with focus tracking
 - **Title bar dragging** for window repositioning
 - **Event routing** -- keyboard events to focused window, mouse events to hit-tested window
-- **Compositor** that redraws desktop background and all windows
+- **Compositor** that redraws desktop background, windows, and start menu overlay
+- **Keyboard shortcuts** -- Alt+F4 to close focused window, Escape to dismiss start menu
 
 ### Built-in Applications
-- **Terminal** -- command-line with `help`, `clear`, `uname`, `mem`, `echo` commands
+- **Terminal** -- command-line with `help`, `clear`, `uname`, `echo` commands; 128-line scrollback buffer with Page Up/Down; command history with Up/Down arrows
 - **File Browser** -- reads files from MyFS disk, clickable file list with content viewer
+- **Text Editor** -- opens files from MyFS, editable text buffer with cursor navigation (arrow keys, Home/End, Page Up/Down), insert/delete, status bar showing filename/line/col, Ctrl+S to save back to disk, auto-scrolling viewport
 - **Calculator** -- 4-function calculator with button grid
 - **About** -- displays system info, RAM usage, and uptime
 
@@ -92,10 +96,10 @@ kernel/           Modular C kernel (loaded at 0x100000)
   drivers/          Serial, keyboard, mouse, ATA, framebuffer
   gfx/              Font rendering, mouse cursor
   gui/              Desktop, window manager, compositor, widgets, events
-  apps/             Terminal, file browser, calculator, about
+  apps/             Terminal, file browser, text editor, calculator, about
   fs/               VFS interface, MyFS implementation
-  proc/             Process management, ELF loader, syscall dispatch
-  lib/              String/memory utilities (freestanding)
+  proc/             Process management, ELF loader, syscalls
+  lib/              Freestanding library (string/memory functions)
 ```
 
 ### Memory Map
@@ -134,7 +138,7 @@ x86-OS/
     drivers/                Hardware drivers (serial, keyboard, mouse, ATA, framebuffer)
     gfx/                    Graphics primitives (font rendering, cursor)
     gui/                    GUI framework (desktop, window manager, compositor, widgets)
-    apps/                   Built-in applications (terminal, file browser, calc, about)
+    apps/                   Built-in applications (terminal, file browser, editor, calc, about)
     fs/                     Filesystem (VFS interface, MyFS implementation)
     proc/                   Process management (tasks, ELF loader, syscalls)
     lib/                    Freestanding library (string/memory functions)
@@ -190,13 +194,16 @@ QEMU runs with both drives attached.
 When you run `make run-hdd`, QEMU shows:
 
 1. A **blue gradient desktop** wallpaper
-2. Four **desktop icons** (Terminal, Files, About, Calc) with shadow labels
+2. Five **desktop icons** (Terminal, Files, Editor, Calc, About) with shadow labels
 3. A **taskbar** at the bottom with a Start button and live **MM:SS clock**
-4. A **mouse cursor** that follows your movements
-5. Click icons to **open applications** in draggable windows
-6. The **Terminal** accepts commands (`help`, `clear`, `uname`, `echo`)
-7. The **File Browser** reads real files from the MyFS disk
-8. The **Calculator** handles basic arithmetic with a button grid
+4. Click the **Start button** to open a popup menu with all apps listed
+5. A **mouse cursor** that follows your movements
+6. Click icons or Start menu entries to **open applications** in draggable windows
+7. The **Terminal** accepts commands (`help`, `clear`, `uname`, `echo`); scroll back with Page Up/Down; recall commands with Up/Down arrows
+8. The **Text Editor** opens files, lets you type and navigate, and saves with Ctrl+S
+9. The **File Browser** reads real files from the MyFS disk
+10. The **Calculator** handles basic arithmetic with a button grid
+11. Press **Alt+F4** to close the focused window; **Escape** to dismiss the Start menu
 
 Serial output (in the terminal) shows boot diagnostics: memory map, PMM stats,
 paging info, heap size, ATA drive detection, filesystem mount, and more.
@@ -216,14 +223,17 @@ paging info, heap size, ATA drive detection, filesystem mount, and more.
 - [x] Desktop UI (gradient, icons, taskbar, clock)
 - [x] Migrate kernel to modular freestanding C
 - [x] ATA PIO disk driver
-- [x] On-disk filesystem (MyFS)
+- [x] On-disk filesystem (MyFS) with read/write
 - [x] Window manager (create/move/close/focus)
 - [x] Built-in apps (terminal, file browser, calculator, about)
 - [x] Process model with context switching
 - [x] System call interface (INT 0x30)
 - [x] Double-buffered rendering
 - [x] Organised source tree (arch/mem/drivers/gfx/gui/apps/fs/proc/lib)
+- [x] Text editor with file save support
+- [x] Start menu with app launcher
+- [x] Keyboard shortcuts (Shift/Ctrl/Alt modifiers, Alt+F4)
+- [x] Terminal scrollback and command history
 - [ ] Preemptive multitasking
 - [ ] User-mode programs (ring 3)
-- [ ] Text editor application
 - [ ] Network stack (NE2000 / virtio-net)
