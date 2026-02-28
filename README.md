@@ -29,8 +29,14 @@ VGA text memory.
 - NASM
 - QEMU (x86)
 - GNU Make
+- **macOS only:** i686-elf binutils (for `ld` and `objcopy` to produce ELF binaries)
 
 ---
+
+# On macOS (Homebrew):
+```bash
+brew install nasm qemu i686-elf-binutils make
+```
 
 # On Ubuntu / Debian-based systems:
 ```bash

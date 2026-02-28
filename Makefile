@@ -3,6 +3,16 @@ BUILD=build
 
 STAGE2_SECTORS=1
 
+# On macOS we need cross-compiler binutils for ELF i386 (system ld/objcopy are Mach-O only)
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+  LD := i686-elf-ld
+  OBJCOPY := i686-elf-objcopy
+else
+  LD := ld
+  OBJCOPY := objcopy
+endif
+
 all: $(BUILD)/os.img
 
 $(BUILD):
@@ -18,10 +28,10 @@ $(BUILD)/kernel.o: kernel.asm | $(BUILD)
 	$(ASM) -f elf32 kernel.asm -o $(BUILD)/kernel.o
 
 $(BUILD)/kernel.elf: $(BUILD)/kernel.o linker.ld | $(BUILD)
-	ld -m elf_i386 -T linker.ld -o $(BUILD)/kernel.elf $(BUILD)/kernel.o
+	$(LD) -m elf_i386 -T linker.ld -o $(BUILD)/kernel.elf $(BUILD)/kernel.o
 
 $(BUILD)/kernel.bin: $(BUILD)/kernel.elf | $(BUILD)
-	objcopy -O binary $(BUILD)/kernel.elf $(BUILD)/kernel.bin
+	$(OBJCOPY) -O binary $(BUILD)/kernel.elf $(BUILD)/kernel.bin
 
 $(BUILD)/os.img: $(BUILD)/boot.bin $(BUILD)/stage2.bin $(BUILD)/kernel.elf
 	dd if=/dev/zero of=$(BUILD)/os.img bs=512 count=2880 status=none
