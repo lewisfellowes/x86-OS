@@ -34,6 +34,8 @@ pmm_bitmap        resd 1
 pmm_bitmap_size   resd 1
 pmm_total_frames  resd 1
 pmm_free_frames   resd 1
+page_directory    resd 1
+paging_num_pts    resd 1
 
 section .text
 _start:
@@ -73,6 +75,9 @@ _start:
 
     ; Initialize physical memory manager (bitmap allocator)
     call pmm_init
+
+    ; Set up identity-mapped paging and enable CR0.PG
+    call paging_init
 
     ; Init IDT and load it
     call idt_init
@@ -1030,6 +1035,155 @@ pmm_print_summary:
     pop eax
     ret
 
+; ==============================
+; Paging (identity-map)
+; ==============================
+; Allocates a page directory and one page table per 4 MiB region
+; covering all usable physical memory.  Virtual == physical after
+; this, so nothing moves — it just enables the MMU.
+
+paging_init:
+    push eax
+    push ebx
+    push ecx
+    push edx
+    push esi
+    push edi
+    push ebp
+
+    ; How many 4 MiB regions to map?
+    ; num_pts = ceil(pmm_total_frames * PAGE_SIZE / 4 MiB)
+    mov eax, [pmm_total_frames]
+    shl eax, PAGE_SHIFT
+    add eax, 0x3FFFFF
+    shr eax, 22
+    mov ebp, eax
+
+    test ebp, ebp
+    jz .pg_oom
+
+    ; Allocate and zero the page directory
+    call pmm_alloc_frame
+    test eax, eax
+    jz .pg_oom
+    mov [page_directory], eax
+
+    mov edi, eax
+    xor eax, eax
+    mov ecx, 1024
+    rep stosd
+
+    ; Build one page table per 4 MiB region
+    xor esi, esi
+
+.pg_pt_loop:
+    cmp esi, ebp
+    jge .pg_pt_done
+
+    call pmm_alloc_frame
+    test eax, eax
+    jz .pg_oom
+
+    ; Fill 1024 PT entries: each maps one 4 KiB page
+    push eax
+    mov edi, eax
+    mov ebx, esi
+    shl ebx, 22
+    mov ecx, 1024
+
+.pg_fill_pt:
+    mov eax, ebx
+    or eax, 0x03
+    stosd
+    add ebx, PAGE_SIZE
+    dec ecx
+    jnz .pg_fill_pt
+
+    ; Set PD entry: PD[esi] = PT_phys | present | writable
+    pop eax
+    mov edi, [page_directory]
+    or eax, 0x03
+    mov [edi + esi*4], eax
+
+    inc esi
+    jmp .pg_pt_loop
+
+.pg_pt_done:
+    mov [paging_num_pts], ebp
+
+    ; Log before the point of no return
+    mov esi, serial_msg_pg_enabling
+    call serial_write_str
+
+    ; Load CR3 and flip CR0.PG
+    mov eax, [page_directory]
+    mov cr3, eax
+
+    mov eax, cr0
+    or eax, 0x80000000
+    mov cr0, eax
+
+    jmp .pg_flush
+.pg_flush:
+
+    call paging_print_summary
+    jmp .pg_done
+
+.pg_oom:
+    mov esi, serial_msg_pg_oom
+    call serial_write_str
+
+.pg_done:
+    pop ebp
+    pop edi
+    pop esi
+    pop edx
+    pop ecx
+    pop ebx
+    pop eax
+    ret
+
+; paging_print_summary — log paging state to serial + VGA row 10
+paging_print_summary:
+    push eax
+    push ebx
+    push esi
+    push edi
+
+    mov esi, serial_msg_pg_hdr
+    call serial_write_str
+
+    mov esi, serial_msg_pg_pd
+    call serial_write_str
+    mov eax, [page_directory]
+    call serial_write_hex32
+    mov esi, serial_msg_crlf
+    call serial_write_str
+
+    mov esi, serial_msg_pg_pts
+    call serial_write_str
+    mov eax, [paging_num_pts]
+    call serial_write_hex32
+    mov esi, serial_msg_crlf
+    call serial_write_str
+
+    mov esi, serial_msg_pg_on
+    call serial_write_str
+
+    ; VGA row 10
+    mov edi, 0xB8000 + (80*10*2)
+    mov bl, 0x0B
+    mov esi, msg_paging
+    call vga_print
+    mov eax, [page_directory]
+    call vga_print_hex32
+
+    pop edi
+    pop esi
+    pop ebx
+    pop eax
+    ret
+
 ; -----------------------
 ; Serial (COM1) logging
 ; -----------------------
@@ -1361,6 +1515,14 @@ serial_msg_pmm_realloc db "  realloc: 0x", 0
 msg_pmm_summary        db "PMM: 0x", 0
 msg_pmm_slash          db "/0x", 0
 msg_pmm_frames         db " frames", 0
+
+serial_msg_pg_hdr      db "== Paging ==", 13, 10, 0
+serial_msg_pg_pd       db "  PD at: 0x", 0
+serial_msg_pg_pts      db "  page tables: 0x", 0
+serial_msg_pg_enabling db "  enabling CR0.PG...", 13, 10, 0
+serial_msg_pg_on       db "  paging ENABLED", 13, 10, 0
+serial_msg_pg_oom      db "PAGING: OOM!", 13, 10, 0
+msg_paging             db "Paging ON  CR3=0x", 0
 
 ; The `s*` variables represent debug text identifiers.
 s0          db " S0=",0
