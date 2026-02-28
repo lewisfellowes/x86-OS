@@ -8,7 +8,7 @@ STAGE2_LOAD_ADDR     equ 0x8000
 KERNEL_ELF_ADDR      equ 0x9000
 
 STAGE2_SECTORS       equ 1
-KERNEL_SECTORS       equ 32
+KERNEL_SECTORS       equ 64
 
 ; -----------------------------
 ; Boot info + memory map layout
@@ -19,6 +19,7 @@ BOOT_INFO_ADDR       equ 0x6000        ; physical address (avoid 0x5000 – BIOS
 E820_BUFFER_ADDR     equ 0x5100        ; start of E820 entry array
 E820_ENTRY_SIZE      equ 20            ; bytes per E820 entry (base,len,type)
 E820_MAX_ENTRIES     equ 32            ; hard cap to avoid overruns
+VGA_FONT_ADDR        equ 0x4000        ; VGA 8x16 font copied here before PM switch
 
 ; boot_info struct layout (32-bit words unless noted)
 ;   +0  : magic      (0x1BADB002 for now)
@@ -91,6 +92,23 @@ start:
     mov word [bx + 14], 0
     mov [bx + 16], bp
     mov word [bx + 18], 0
+
+    ; ---- Copy VGA 8x16 font from BIOS ROM to low memory ----
+    ; INT 10h AX=1130h BH=06 -> ES:BP = 256-char 8x16 ROM font.
+    ; Memcpy 4096 bytes to VGA_FONT_ADDR for kernel text rendering.
+    mov ax, 0x1130
+    mov bh, 0x06
+    int 0x10
+    push ds
+    push es
+    pop ds
+    mov si, bp
+    xor ax, ax
+    mov es, ax
+    mov di, VGA_FONT_ADDR
+    mov cx, 2048
+    rep movsw
+    pop ds
 
     ; Load Stage2 from LBA 1 into 0000:8000
     mov bx, STAGE2_LOAD_ADDR

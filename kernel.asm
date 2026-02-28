@@ -50,6 +50,30 @@ FB_HEIGHT          equ 480
 FB_BPP             equ 32
 FB_PITCH           equ (FB_WIDTH * 4)
 
+VGA_FONT_ADDR      equ 0x4000
+FONT_CHAR_WIDTH    equ 8
+FONT_CHAR_HEIGHT   equ 16
+
+CURSOR_W           equ 8
+CURSOR_H           equ 12
+
+; Transparent background sentinel (any value with bits 24+ set)
+FB_TRANSPARENT     equ 0xFF000000
+
+; File manager layout
+FM_X               equ 150
+FM_Y               equ 50
+FM_W               equ 440
+FM_H               equ 360
+FM_TITLE_H         equ 24
+FM_ENTRY_H         equ 20
+NUM_FILES          equ 5
+FILE_ENTRY_SIZE    equ 40
+FILE_PTR_OFF       equ 32
+FILE_LEN_OFF       equ 36
+FM_LIST_Y          equ (FM_Y + FM_TITLE_H)
+FM_CONTENT_Y       equ (FM_LIST_Y + NUM_FILES * FM_ENTRY_H + 4)
+
 extern _kernel_end
 
 section .bss
@@ -66,6 +90,25 @@ paging_num_pts    resd 1
 heap_start        resd 1
 heap_end          resd 1
 fb_addr           resd 1
+fb_fg_color       resd 1
+fb_bg_color       resd 1
+mouse_x           resd 1
+mouse_y           resd 1
+mouse_buttons     resb 1
+mouse_cycle       resb 1
+mouse_bytes       resb 3
+mouse_updated     resb 1
+cursor_drawn      resb 1
+align 4
+old_mouse_x       resd 1
+old_mouse_y       resd 1
+cursor_save       resd 96
+selected_file     resd 1
+mouse_was_pressed resb 1
+fm_needs_redraw   resb 1
+align 4
+last_second       resd 1
+clock_buf         resb 8
 
 section .text
 _start:
@@ -133,10 +176,67 @@ _start:
     ; Switch to 640x480x32bpp graphics via BGA
     call fb_init
 
-    ; Enable hardware interrupts and enter idle loop
+    ; Initialize PS/2 mouse (must be after PIC remap + IDT)
+    call mouse_init
+
+    ; Enable hardware interrupts, draw initial cursor, enter event loop
     sti
+    call cursor_draw
+
 .halt_loop:
     hlt
+
+    ; --- Clock update (once per second) ---
+    mov eax, [tick_count]
+    xor edx, edx
+    mov ecx, 100
+    div ecx
+    cmp eax, [last_second]
+    je .no_clock
+    mov [last_second], eax
+    cli
+    call cursor_erase
+    call draw_clock
+    call cursor_draw
+    sti
+.no_clock:
+
+    ; --- Mouse event processing ---
+    cmp byte [mouse_updated], 0
+    je .halt_loop
+    mov byte [mouse_updated], 0
+
+    ; Edge-detect left-button press
+    movzx eax, byte [mouse_buttons]
+    test al, 1
+    jz .ml_released
+
+    cmp byte [mouse_was_pressed], 1
+    je .ml_cursor_only
+    mov byte [mouse_was_pressed], 1
+
+    mov eax, [mouse_x]
+    mov ebx, [mouse_y]
+    call fm_handle_click
+
+    cmp byte [fm_needs_redraw], 0
+    je .ml_cursor_only
+    mov byte [fm_needs_redraw], 0
+    cli
+    call cursor_erase
+    call fm_draw
+    call cursor_draw
+    sti
+    jmp .halt_loop
+
+.ml_released:
+    mov byte [mouse_was_pressed], 0
+
+.ml_cursor_only:
+    cli
+    call cursor_erase
+    call cursor_draw
+    sti
     jmp .halt_loop
 
 
@@ -174,6 +274,12 @@ idt_init:
     ; IRQ1 – keyboard at vector 33
     push dword irq1
     push dword 33
+    call idt_set_gate
+    add esp, 8
+
+    ; IRQ12 – PS/2 mouse at vector 44 (slave offset 0x28 + 4)
+    push dword irq12_mouse
+    push dword 44
     call idt_set_gate
     add esp, 8
 
@@ -464,12 +570,12 @@ pic_remap:
     mov dx, PIC2_DATA
     out dx, al
 
-    ; OCW1 – interrupt masks: enable only IRQ0 and IRQ1 on master
-    mov al, 11111100b       ; 0 & 1 unmasked, others masked
+    ; OCW1 – interrupt masks
+    mov al, 11111000b       ; IRQ0 (PIT), IRQ1 (kbd), IRQ2 (cascade) unmasked
     mov dx, PIC1_DATA
     out dx, al
 
-    mov al, 11111111b       ; mask all on slave for now
+    mov al, 11101111b       ; IRQ12 (mouse = slave bit 4) unmasked
     mov dx, PIC2_DATA
     out dx, al
 
@@ -1576,13 +1682,10 @@ fb_init:
     mov eax, [fb_addr]
     call fb_map_4mb
 
-    ; --- Clear to dark background ---
-    mov edi, [fb_addr]
-    mov ecx, FB_WIDTH * FB_HEIGHT
-    mov eax, 0x00203040
-    rep stosd
+    ; --- Draw gradient desktop wallpaper ---
+    call fb_draw_gradient
 
-    ; --- Draw test desktop ---
+    ; --- Draw desktop (taskbar, icons, file manager) ---
     call fb_draw_desktop
 
     ; --- Serial log ---
@@ -1690,59 +1793,489 @@ fb_fill_rect:
     pop eax
     ret
 
-; fb_draw_desktop — simple desktop scene: background, taskbar, window
-fb_draw_desktop:
-    push eax
-    push ebx
-    push ecx
-    push edx
-    push esi
+; fb_draw_gradient — vertical blue gradient for desktop wallpaper
+; Draws 22 horizontal bands of 20 rows each (440 rows total, above taskbar).
+fb_draw_gradient:
+    pushad
+    sub esp, 4
 
-    ; Taskbar (bottom 40 px, dark gray)
+    mov edi, [fb_addr]
+    mov dword [esp], 0
+
+.gd_band:
+    mov ebp, [esp]
+    cmp ebp, 22
+    jge .gd_done
+
+    ; R = 0x44 - 0x30 * band / 21
+    mov eax, 0x30
+    imul eax, ebp
+    xor edx, edx
+    mov ecx, 21
+    div ecx
+    mov ebx, 0x44
+    sub ebx, eax
+    shl ebx, 16
+
+    ; G = 0x78 - 0x50 * band / 21
+    mov eax, 0x50
+    imul eax, ebp
+    xor edx, edx
+    mov ecx, 21
+    div ecx
+    mov edx, 0x78
+    sub edx, eax
+    and edx, 0xFF
+    shl edx, 8
+    or ebx, edx
+
+    ; B = 0xB8 - 0x70 * band / 21
+    mov eax, 0x70
+    imul eax, ebp
+    xor edx, edx
+    mov ecx, 21
+    div ecx
+    mov edx, 0xB8
+    sub edx, eax
+    and edx, 0xFF
+    or ebx, edx
+
+    mov eax, ebx
+    mov ecx, FB_WIDTH * 20
+    rep stosd
+
+    inc dword [esp]
+    jmp .gd_band
+
+.gd_done:
+    add esp, 4
+    popad
+    ret
+
+; draw_clock — format tick_count as MM:SS and draw on taskbar
+draw_clock:
+    pushad
+
+    mov eax, [tick_count]
+    xor edx, edx
+    mov ecx, 100
+    div ecx
+
+    xor edx, edx
+    mov ecx, 60
+    div ecx
+    push edx
+
+    xor edx, edx
+    mov ecx, 10
+    div ecx
+    add al, '0'
+    mov [clock_buf], al
+    add dl, '0'
+    mov [clock_buf + 1], dl
+    mov byte [clock_buf + 2], ':'
+
+    pop eax
+    xor edx, edx
+    mov ecx, 10
+    div ecx
+    add al, '0'
+    mov [clock_buf + 3], al
+    add dl, '0'
+    mov [clock_buf + 4], dl
+    mov byte [clock_buf + 5], 0
+
+    mov eax, FB_WIDTH - 56
+    mov ebx, FB_HEIGHT - 34
+    mov ecx, 48
+    mov edx, 24
+    mov esi, 0x00283040
+    call fb_fill_rect
+
+    mov dword [fb_fg_color], 0x00C0D0E0
+    mov dword [fb_bg_color], 0x00283040
+    mov eax, FB_WIDTH - 48
+    mov ebx, FB_HEIGHT - 28
+    mov esi, clock_buf
+    call fb_draw_string
+
+    popad
+    ret
+
+; fb_draw_desktop — full desktop: taskbar, icons, file manager
+fb_draw_desktop:
+    pushad
+
+    ; === Taskbar (gradient-style, bottom 40 px) ===
     xor eax, eax
     mov ebx, FB_HEIGHT - 40
     mov ecx, FB_WIDTH
-    mov edx, 40
-    mov esi, 0x00404050
+    mov edx, 2
+    mov esi, 0x00506070
     call fb_fill_rect
 
-    ; Window body (300x200, centered, light gray)
-    mov eax, (FB_WIDTH - 300) / 2
-    mov ebx, 100
-    mov ecx, 300
-    mov edx, 200
+    xor eax, eax
+    mov ebx, FB_HEIGHT - 38
+    mov ecx, FB_WIDTH
+    mov edx, 38
+    mov esi, 0x00384858
+    call fb_fill_rect
+
+    ; Start button (raised)
+    mov eax, 4
+    mov ebx, FB_HEIGHT - 36
+    mov ecx, 64
+    mov edx, 32
+    mov esi, 0x00406838
+    call fb_fill_rect
+
+    mov dword [fb_fg_color], 0x00FFFFFF
+    mov dword [fb_bg_color], 0x00406838
+    mov eax, 12
+    mov ebx, FB_HEIGHT - 28
+    mov esi, str_start
+    call fb_draw_string
+
+    ; Clock area
+    call draw_clock
+
+    ; Taskbar separator (thin bright line at left of clock)
+    mov eax, FB_WIDTH - 62
+    mov ebx, FB_HEIGHT - 34
+    mov ecx, 1
+    mov edx, 24
+    mov esi, 0x00506878
+    call fb_fill_rect
+
+    ; === Desktop Icons ===
+
+    ; -- Computer --
+    mov eax, 30
+    mov ebx, 60
+    mov ecx, 42
+    mov edx, 34
+    mov esi, 0x00406888
+    call fb_fill_rect
+    mov eax, 34
+    mov ebx, 64
+    mov ecx, 34
+    mov edx, 22
+    mov esi, 0x0060A8D0
+    call fb_fill_rect
+    mov eax, 42
+    mov ebx, 94
+    mov ecx, 18
+    mov edx, 6
+    mov esi, 0x00607080
+    call fb_fill_rect
+
+    ; Label shadow
+    mov dword [fb_fg_color], 0x00102030
+    mov dword [fb_bg_color], FB_TRANSPARENT
+    mov eax, 17
+    mov ebx, 103
+    mov esi, str_icon_computer
+    call fb_draw_string
+    ; Label
+    mov dword [fb_fg_color], 0x00FFFFFF
+    mov eax, 16
+    mov ebx, 102
+    call fb_draw_string
+
+    ; -- Files --
+    mov eax, 30
+    mov ebx, 160
+    mov ecx, 42
+    mov edx, 34
+    mov esi, 0x00D8B838
+    call fb_fill_rect
+    mov eax, 30
+    mov ebx, 155
+    mov ecx, 28
+    mov edx, 8
+    mov esi, 0x00E8C848
+    call fb_fill_rect
+
+    mov dword [fb_fg_color], 0x00102030
+    mov dword [fb_bg_color], FB_TRANSPARENT
+    mov eax, 33
+    mov ebx, 199
+    mov esi, str_icon_files
+    call fb_draw_string
+    mov dword [fb_fg_color], 0x00FFFFFF
+    mov eax, 32
+    mov ebx, 198
+    call fb_draw_string
+
+    ; -- Trash --
+    mov eax, 30
+    mov ebx, 260
+    mov ecx, 42
+    mov edx, 34
+    mov esi, 0x00708090
+    call fb_fill_rect
+    mov eax, 28
+    mov ebx, 258
+    mov ecx, 46
+    mov edx, 6
+    mov esi, 0x00586878
+    call fb_fill_rect
+
+    mov dword [fb_fg_color], 0x00102030
+    mov dword [fb_bg_color], FB_TRANSPARENT
+    mov eax, 33
+    mov ebx, 299
+    mov esi, str_icon_trash
+    call fb_draw_string
+    mov dword [fb_fg_color], 0x00FFFFFF
+    mov eax, 32
+    mov ebx, 298
+    call fb_draw_string
+
+    ; === File Manager window ===
+    call fm_draw
+
+    popad
+    ret
+
+; ==============================
+; File Manager
+; ==============================
+
+; fm_draw — render the file manager window (file list + content viewer)
+fm_draw:
+    pushad
+    sub esp, 4
+
+    ; --- Drop shadow ---
+    mov eax, FM_X + 5
+    mov ebx, FM_Y + 5
+    mov ecx, FM_W
+    mov edx, FM_H
+    mov esi, 0x00101820
+    call fb_fill_rect
+
+    ; --- Window border (1px dark frame) ---
+    mov eax, FM_X - 1
+    mov ebx, FM_Y - 1
+    mov ecx, FM_W + 2
+    mov edx, FM_H + 2
+    mov esi, 0x001A3050
+    call fb_fill_rect
+
+    ; --- Window background ---
+    mov eax, FM_X
+    mov ebx, FM_Y
+    mov ecx, FM_W
+    mov edx, FM_H
     mov esi, 0x00E8E8E8
     call fb_fill_rect
 
-    ; Title bar (blue)
-    mov eax, (FB_WIDTH - 300) / 2
-    mov ebx, 100
-    mov ecx, 300
-    mov edx, 24
-    mov esi, 0x003060A0
+    ; --- Title bar ---
+    mov eax, FM_X
+    mov ebx, FM_Y
+    mov ecx, FM_W
+    mov edx, FM_TITLE_H
+    mov esi, 0x002050A0
     call fb_fill_rect
 
-    ; Close button (red square, top-right of title bar)
-    mov eax, (FB_WIDTH - 300) / 2 + 300 - 20
-    mov ebx, 104
+    ; Title text
+    mov dword [fb_fg_color], 0x00FFFFFF
+    mov dword [fb_bg_color], 0x002050A0
+    mov eax, FM_X + 8
+    mov ebx, FM_Y + 4
+    mov esi, str_fm_title
+    call fb_draw_string
+
+    ; Close button
+    mov eax, FM_X + FM_W - 20
+    mov ebx, FM_Y + 4
     mov ecx, 16
     mov edx, 16
     mov esi, 0x00E04040
     call fb_fill_rect
+    mov dword [fb_fg_color], 0x00FFFFFF
+    mov dword [fb_bg_color], 0x00E04040
+    mov eax, FM_X + FM_W - 16
+    mov ebx, FM_Y + 4
+    mov esi, str_close
+    call fb_draw_string
 
-    ; Green button in window body
-    mov eax, (FB_WIDTH - 300) / 2 + 20
-    mov ebx, 200
-    mov ecx, 80
-    mov edx, 30
-    mov esi, 0x0040A060
+    ; --- File entries ---
+    mov dword [esp], 0
+
+.fm_entry:
+    mov ecx, [esp]
+    cmp ecx, NUM_FILES
+    jge .fm_entries_done
+
+    ; Y position of this entry
+    imul ebx, ecx, FM_ENTRY_H
+    add ebx, FM_LIST_Y
+
+    ; Highlight if selected
+    cmp ecx, [selected_file]
+    jne .fm_normal
+
+    ; Selected row (blue)
+    mov eax, FM_X
+    mov ecx, FM_W
+    mov edx, FM_ENTRY_H
+    mov esi, 0x003070B0
+    call fb_fill_rect
+    mov dword [fb_fg_color], 0x00FFFFFF
+    mov dword [fb_bg_color], 0x003070B0
+    jmp .fm_draw_icon
+
+.fm_normal:
+    push ebx
+    mov eax, FM_X
+    mov ecx, FM_W
+    mov edx, FM_ENTRY_H
+    mov esi, 0x00E8E8E8
+    call fb_fill_rect
+    pop ebx
+    mov dword [fb_fg_color], 0x00303030
+    mov dword [fb_bg_color], 0x00E8E8E8
+
+.fm_draw_icon:
+    ; Small yellow file icon
+    push ebx
+    mov eax, FM_X + 8
+    add ebx, 3
+    mov ecx, 12
+    mov edx, 14
+    mov esi, 0x00E8C840
+    call fb_fill_rect
+    pop ebx
+
+    ; Filename text
+    mov ecx, [esp]
+    imul eax, ecx, FILE_ENTRY_SIZE
+    lea esi, [file_table + eax]
+    mov eax, FM_X + 28
+    add ebx, 2
+    call fb_draw_string
+
+    inc dword [esp]
+    jmp .fm_entry
+
+.fm_entries_done:
+
+    ; --- Separator line ---
+    mov eax, FM_X
+    mov ebx, FM_CONTENT_Y - 2
+    mov ecx, FM_W
+    mov edx, 2
+    mov esi, 0x00A0A0B0
     call fb_fill_rect
 
-    pop esi
-    pop edx
-    pop ecx
-    pop ebx
+    ; --- Content area ---
+    mov eax, [selected_file]
+    cmp eax, NUM_FILES
+    jge .fm_no_content
+
+    ; Content background (warm white)
+    push eax
+    mov eax, FM_X
+    mov ebx, FM_CONTENT_Y
+    mov ecx, FM_W
+    mov edx, FM_Y + FM_H - FM_CONTENT_Y
+    mov esi, 0x00FFFFF0
+    call fb_fill_rect
     pop eax
+
+    ; Selected filename as header
+    imul ecx, eax, FILE_ENTRY_SIZE
+    push eax
+    mov dword [fb_fg_color], 0x002050A0
+    mov dword [fb_bg_color], 0x00FFFFF0
+    lea esi, [file_table + ecx]
+    mov eax, FM_X + 8
+    mov ebx, FM_CONTENT_Y + 4
+    call fb_draw_string
+    pop eax
+
+    ; Thin rule under header
+    push eax
+    mov eax, FM_X + 8
+    mov ebx, FM_CONTENT_Y + 22
+    mov ecx, FM_W - 16
+    mov edx, 1
+    mov esi, 0x00C0C0C0
+    call fb_fill_rect
+    pop eax
+
+    ; File content text (render char-by-char with newline handling)
+    imul eax, eax, FILE_ENTRY_SIZE
+    mov esi, [file_table + eax + FILE_PTR_OFF]
+
+    mov dword [fb_fg_color], 0x00303030
+    mov dword [fb_bg_color], 0x00FFFFF0
+    mov eax, FM_X + 8
+    mov ebx, FM_CONTENT_Y + 28
+
+.fm_cloop:
+    mov cl, [esi]
+    test cl, cl
+    jz .fm_no_content
+    cmp cl, 10
+    je .fm_cnewline
+
+    cmp eax, FM_X + FM_W - 16
+    jge .fm_cwrap
+
+    call fb_draw_char
+    add eax, FONT_CHAR_WIDTH
+    inc esi
+    jmp .fm_cloop
+
+.fm_cnewline:
+    inc esi
+.fm_cwrap:
+    mov eax, FM_X + 8
+    add ebx, FONT_CHAR_HEIGHT + 2
+    cmp ebx, FM_Y + FM_H - FONT_CHAR_HEIGHT - 4
+    jge .fm_no_content
+    jmp .fm_cloop
+
+.fm_no_content:
+    add esp, 4
+    popad
+    ret
+
+; fm_handle_click — check if click hits a file entry, update selection
+; IN: EAX = x, EBX = y
+fm_handle_click:
+    pushad
+
+    ; Check bounds: x within window?
+    cmp eax, FM_X
+    jl .fmh_done
+    cmp eax, FM_X + FM_W
+    jge .fmh_done
+
+    ; y within file list area?
+    cmp ebx, FM_LIST_Y
+    jl .fmh_done
+    cmp ebx, FM_LIST_Y + NUM_FILES * FM_ENTRY_H
+    jge .fmh_done
+
+    ; Which entry? (y - FM_LIST_Y) / FM_ENTRY_H
+    sub ebx, FM_LIST_Y
+    mov eax, ebx
+    xor edx, edx
+    mov ecx, FM_ENTRY_H
+    div ecx
+
+    cmp eax, NUM_FILES
+    jge .fmh_done
+
+    mov [selected_file], eax
+    mov byte [fm_needs_redraw], 1
+
+.fmh_done:
+    popad
     ret
 
 ; fb_print_summary — log framebuffer info to serial
@@ -1765,6 +2298,388 @@ fb_print_summary:
 
     pop esi
     pop eax
+    ret
+
+; ==============================
+; Bitmap font rendering
+; ==============================
+
+; fb_draw_char — render one 8x16 glyph to the framebuffer
+; IN: EAX = x (pixels), EBX = y (pixels), CL = ASCII character
+;     Colours from [fb_fg_color] and [fb_bg_color]
+fb_draw_char:
+    push eax
+    push ebx
+    push ecx
+    push edx
+    push esi
+    push edi
+    push ebp
+
+    movzx esi, cl
+    shl esi, 4
+    add esi, VGA_FONT_ADDR
+
+    mov edi, [fb_addr]
+    imul ebp, ebx, FB_PITCH
+    add edi, ebp
+    lea edi, [edi + eax*4]
+
+    mov ebp, FONT_CHAR_HEIGHT
+.dc_row:
+    movzx edx, byte [esi]
+    inc esi
+    mov ecx, FONT_CHAR_WIDTH
+.dc_px:
+    test edx, 0x80
+    jz .dc_bg
+    mov eax, [fb_fg_color]
+    mov [edi], eax
+    jmp .dc_nx
+.dc_bg:
+    mov eax, [fb_bg_color]
+    test eax, 0xFF000000
+    jnz .dc_nx
+    mov [edi], eax
+.dc_nx:
+    add edi, 4
+    shl edx, 1
+    dec ecx
+    jnz .dc_px
+
+    add edi, FB_PITCH - (FONT_CHAR_WIDTH * 4)
+    dec ebp
+    jnz .dc_row
+
+    pop ebp
+    pop edi
+    pop esi
+    pop edx
+    pop ecx
+    pop ebx
+    pop eax
+    ret
+
+; fb_draw_string — render a null-terminated string
+; IN: EAX = x, EBX = y, ESI = string pointer
+;     Colours from [fb_fg_color] and [fb_bg_color]
+fb_draw_string:
+    push eax
+    push ecx
+    push esi
+.ds_loop:
+    mov cl, [esi]
+    test cl, cl
+    jz .ds_done
+    call fb_draw_char
+    add eax, FONT_CHAR_WIDTH
+    inc esi
+    jmp .ds_loop
+.ds_done:
+    pop esi
+    pop ecx
+    pop eax
+    ret
+
+; ==============================
+; PS/2 Mouse + Cursor
+; ==============================
+
+mouse_wait_write:
+    push eax
+    push ecx
+    mov ecx, 100000
+.mww:
+    in al, 0x64
+    test al, 2
+    jz .mww_ok
+    dec ecx
+    jnz .mww
+.mww_ok:
+    pop ecx
+    pop eax
+    ret
+
+mouse_wait_read:
+    push eax
+    push ecx
+    mov ecx, 100000
+.mwr:
+    in al, 0x64
+    test al, 1
+    jnz .mwr_ok
+    dec ecx
+    jnz .mwr
+.mwr_ok:
+    pop ecx
+    pop eax
+    ret
+
+; mouse_cmd — send command byte (in AL) to PS/2 mouse via auxiliary channel
+mouse_cmd:
+    push eax
+    push ebx
+    mov bl, al
+
+    call mouse_wait_write
+    mov al, 0xD4
+    out 0x64, al
+
+    call mouse_wait_write
+    mov al, bl
+    out 0x60, al
+
+    call mouse_wait_read
+    in al, 0x60
+
+    pop ebx
+    pop eax
+    ret
+
+mouse_init:
+    push eax
+    push ebx
+    push esi
+
+    ; Flush any pre-existing bytes in the controller buffer (H1)
+.mi_preflush:
+    in al, 0x64
+    test al, 1
+    jz .mi_preflush_done
+    in al, 0x60
+    jmp .mi_preflush
+.mi_preflush_done:
+
+    ; Enable auxiliary (mouse) port
+    call mouse_wait_write
+    mov al, 0xA8
+    out 0x64, al
+
+    ; Read controller config byte, enable IRQ12 (bit 1)
+    call mouse_wait_write
+    mov al, 0x20
+    out 0x64, al
+    call mouse_wait_read
+    in al, 0x60
+    mov bl, al
+    or bl, 0x02
+
+    call mouse_wait_write
+    mov al, 0x60
+    out 0x64, al
+    call mouse_wait_write
+    mov al, bl
+    out 0x60, al
+
+    ; Set defaults, then enable data reporting
+    mov al, 0xF6
+    call mouse_cmd
+    mov al, 0xF4
+    call mouse_cmd
+
+    ; Flush any stale bytes left after init commands (H1)
+.mi_postflush:
+    in al, 0x64
+    test al, 1
+    jz .mi_postflush_done
+    in al, 0x60
+    jmp .mi_postflush
+.mi_postflush_done:
+
+    ; Centre the cursor and reset packet state
+    mov dword [mouse_x], FB_WIDTH / 2
+    mov dword [mouse_y], FB_HEIGHT / 2
+    mov byte [mouse_cycle], 0
+    mov byte [mouse_updated], 0
+    mov byte [cursor_drawn], 0
+
+    mov esi, serial_msg_mouse
+    call serial_write_str
+
+    pop esi
+    pop ebx
+    pop eax
+    ret
+
+; IRQ12 — PS/2 mouse interrupt handler
+; Collects 3-byte packets, updates mouse_x/y/buttons, signals main loop.
+irq12_mouse:
+    cli
+    pushad
+
+    ; Read status first (bit 5 = aux data), then always read data to clear IRQ
+    in al, 0x64
+    mov bl, al
+    in al, 0x60
+
+    ; H4: only process bytes that came from the auxiliary (mouse) port
+    test bl, 0x20
+    jz .m12_done
+
+    movzx ecx, byte [mouse_cycle]
+
+    ; H3: validate byte 0 immediately — bit 3 must be set (PS/2 alignment)
+    test ecx, ecx
+    jnz .m12_store
+    test al, 0x08
+    jz .m12_done
+
+.m12_store:
+    mov [mouse_bytes + ecx], al
+    inc ecx
+    cmp ecx, 3
+    jne .m12_partial
+
+    ; --- Complete 3-byte packet ---
+    xor ecx, ecx
+    mov [mouse_cycle], cl
+
+    movzx eax, byte [mouse_bytes]
+
+    ; H2: discard packet if overflow bits (6 or 7) are set
+    test eax, 0xC0
+    jnz .m12_done
+
+    mov [mouse_buttons], al
+
+    ; X delta (sign-extend using bit 4 of status byte)
+    movzx edx, byte [mouse_bytes + 1]
+    test eax, 0x10
+    jz .m12_xpos
+    or edx, 0xFFFFFF00
+.m12_xpos:
+    add [mouse_x], edx
+
+    cmp dword [mouse_x], 0
+    jge .m12_xlo
+    mov dword [mouse_x], 0
+.m12_xlo:
+    cmp dword [mouse_x], FB_WIDTH - CURSOR_W
+    jle .m12_xhi
+    mov dword [mouse_x], FB_WIDTH - CURSOR_W
+.m12_xhi:
+
+    ; Y delta (inverted: subtract because screen Y grows downward)
+    movzx edx, byte [mouse_bytes + 2]
+    test eax, 0x20
+    jz .m12_ypos
+    or edx, 0xFFFFFF00
+.m12_ypos:
+    sub [mouse_y], edx
+
+    cmp dword [mouse_y], 0
+    jge .m12_ylo
+    mov dword [mouse_y], 0
+.m12_ylo:
+    cmp dword [mouse_y], FB_HEIGHT - CURSOR_H
+    jle .m12_yhi
+    mov dword [mouse_y], FB_HEIGHT - CURSOR_H
+.m12_yhi:
+
+    mov byte [mouse_updated], 1
+    jmp .m12_done
+
+.m12_partial:
+    mov [mouse_cycle], cl
+
+.m12_done:
+    mov al, 0x20
+    out PIC2_CMD, al
+    out PIC1_CMD, al
+
+    popad
+    sti
+    iretd
+
+; cursor_draw — save background, then paint the arrow cursor
+cursor_draw:
+    pushad
+
+    mov eax, [mouse_x]
+    mov ebx, [mouse_y]
+    mov [old_mouse_x], eax
+    mov [old_mouse_y], ebx
+
+    mov edi, [fb_addr]
+    imul ecx, ebx, FB_PITCH
+    add edi, ecx
+    lea edi, [edi + eax*4]
+
+    lea esi, [cursor_data]
+    lea ebp, [cursor_save]
+
+    mov edx, CURSOR_H
+.cd_row:
+    push edi
+    mov ecx, CURSOR_W
+.cd_col:
+    mov eax, [edi]
+    mov [ebp], eax
+    add ebp, 4
+
+    movzx eax, byte [esi]
+    inc esi
+
+    test eax, eax
+    jz .cd_skip
+    cmp eax, 1
+    je .cd_black
+    mov dword [edi], 0x00FFFFFF
+    jmp .cd_skip
+.cd_black:
+    mov dword [edi], 0x00000000
+.cd_skip:
+    add edi, 4
+    dec ecx
+    jnz .cd_col
+
+    pop edi
+    add edi, FB_PITCH
+    dec edx
+    jnz .cd_row
+
+    mov byte [cursor_drawn], 1
+    popad
+    ret
+
+; cursor_erase — restore saved background pixels
+cursor_erase:
+    pushad
+
+    cmp byte [cursor_drawn], 0
+    je .ce_done
+
+    mov eax, [old_mouse_x]
+    mov ebx, [old_mouse_y]
+
+    mov edi, [fb_addr]
+    imul ecx, ebx, FB_PITCH
+    add edi, ecx
+    lea edi, [edi + eax*4]
+
+    lea esi, [cursor_save]
+
+    mov edx, CURSOR_H
+.ce_row:
+    push edi
+    mov ecx, CURSOR_W
+.ce_col:
+    mov eax, [esi]
+    mov [edi], eax
+    add esi, 4
+    add edi, 4
+    dec ecx
+    jnz .ce_col
+
+    pop edi
+    add edi, FB_PITCH
+    dec edx
+    jnz .ce_row
+
+    mov byte [cursor_drawn], 0
+
+.ce_done:
+    popad
     ret
 
 ; -----------------------
@@ -2125,6 +3040,118 @@ serial_msg_fb_hdr      db "== Framebuffer ==", 13, 10, 0
 serial_msg_fb_addr     db "  LFB at: 0x", 0
 serial_msg_fb_mode     db "  mode: 640x480x32bpp", 13, 10, 0
 serial_msg_fb_fail     db "FB: BGA not detected", 13, 10, 0
+
+str_close       db "X", 0
+str_start       db "Start", 0
+str_fm_title    db "File Manager", 0
+str_icon_computer db "Computer", 0
+str_icon_files  db "Files", 0
+str_icon_trash  db "Trash", 0
+
+; ---- In-memory file table (NUM_FILES entries, FILE_ENTRY_SIZE bytes each) ----
+; Layout per entry: 32-byte name | 4-byte content_ptr | 4-byte content_len
+
+file_table:
+    db "readme.txt", 0
+    times 32 - 11 db 0
+    dd file0_data
+    dd file0_end - file0_data
+
+    db "hello.txt", 0
+    times 32 - 10 db 0
+    dd file1_data
+    dd file1_end - file1_data
+
+    db "notes.txt", 0
+    times 32 - 10 db 0
+    dd file2_data
+    dd file2_end - file2_data
+
+    db "about.txt", 0
+    times 32 - 10 db 0
+    dd file3_data
+    dd file3_end - file3_data
+
+    db "license.txt", 0
+    times 32 - 12 db 0
+    dd file4_data
+    dd file4_end - file4_data
+
+file0_data:
+    db "Welcome to My OS!", 10
+    db "This is a simple x86 operating system.", 10
+    db "Written entirely in NASM assembly.", 10
+    db 10
+    db "Features so far:", 10
+    db "  - Protected mode kernel at 1 MB", 10
+    db "  - Physical memory manager (bitmap)", 10
+    db "  - Paging with identity mapping", 10
+    db "  - Kernel heap (kmalloc/kfree)", 10
+    db "  - 640x480 32bpp framebuffer", 10
+    db "  - Bitmap font rendering", 10
+    db "  - PS/2 mouse driver", 10
+    db "  - This file manager!", 0
+file0_end:
+
+file1_data:
+    db "Hello, World!", 10
+    db "Greetings from 32-bit protected mode!", 10
+    db 10
+    db "The CPU is running ring 0 code", 10
+    db "with paging enabled.", 0
+file1_end:
+
+file2_data:
+    db "TODO list:", 10
+    db "  [x] Boot sector + stage2 loader", 10
+    db "  [x] IDT, PIC, PIT timer", 10
+    db "  [x] Physical memory manager", 10
+    db "  [x] Paging", 10
+    db "  [x] Kernel heap", 10
+    db "  [x] Framebuffer graphics", 10
+    db "  [x] Font rendering", 10
+    db "  [x] PS/2 mouse driver", 10
+    db "  [x] File manager UI", 10
+    db "  [ ] ATA disk driver", 10
+    db "  [ ] Real filesystem", 10
+    db "  [ ] Window manager", 10
+    db "  [ ] User programs", 0
+file2_end:
+
+file3_data:
+    db "My OS v0.1", 10
+    db "A 32-bit x86 operating system", 10
+    db "Built with NASM assembly language", 10
+    db "Running on QEMU/i386", 10
+    db 10
+    db "Boot: BIOS MBR -> stage2 -> ELF kernel", 10
+    db "Video: Bochs VGA 640x480x32bpp", 0
+file3_end:
+
+file4_data:
+    db "PUBLIC DOMAIN", 10
+    db 10
+    db "This operating system is released", 10
+    db "into the public domain.", 10
+    db "Free to use, modify, and distribute.", 0
+file4_end:
+
+serial_msg_mouse   db "mouse: PS/2 init OK", 13, 10, 0
+
+; 8x12 arrow cursor (0=transparent, 1=black, 2=white)
+cursor_data:
+    db 1,0,0,0,0,0,0,0
+    db 1,1,0,0,0,0,0,0
+    db 1,2,1,0,0,0,0,0
+    db 1,2,2,1,0,0,0,0
+    db 1,2,2,2,1,0,0,0
+    db 1,2,2,2,2,1,0,0
+    db 1,2,2,2,2,2,1,0
+    db 1,2,2,2,2,2,2,1
+    db 1,2,2,2,1,1,0,0
+    db 1,2,1,1,2,1,0,0
+    db 1,1,0,0,1,2,1,0
+    db 1,0,0,0,0,1,1,0
 
 ; The `s*` variables represent debug text identifiers.
 s0          db " S0=",0
