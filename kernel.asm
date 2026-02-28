@@ -23,6 +23,12 @@ E820_ENTRY_SIZE   equ 20
 PAGE_SIZE         equ 4096
 PAGE_SHIFT        equ 12
 
+HEAP_INITIAL_PAGES equ 64
+HEAP_HEADER_SIZE   equ 8
+HEAP_USED          equ 1
+HEAP_FREE          equ 0
+HEAP_ALIGN         equ 8
+
 extern _kernel_end
 
 section .bss
@@ -36,6 +42,8 @@ pmm_total_frames  resd 1
 pmm_free_frames   resd 1
 page_directory    resd 1
 paging_num_pts    resd 1
+heap_start        resd 1
+heap_end          resd 1
 
 section .text
 _start:
@@ -78,6 +86,9 @@ _start:
 
     ; Set up identity-mapped paging and enable CR0.PG
     call paging_init
+
+    ; Initialize kernel heap (kmalloc/kfree)
+    call heap_init
 
     ; Init IDT and load it
     call idt_init
@@ -1184,6 +1195,287 @@ paging_print_summary:
     pop eax
     ret
 
+; ==============================
+; Kernel Heap (kmalloc / kfree)
+; ==============================
+; Linear first-fit allocator.  Each block has an 8-byte header:
+;   [+0] size  (uint32) — data bytes (excludes header)
+;   [+4] flags (uint32) — bit 0: 1 = used, 0 = free
+; Heap is backed by HEAP_INITIAL_PAGES consecutive PMM frames.
+
+heap_init:
+    push eax
+    push ecx
+    push edi
+
+    ; Allocate first frame — this becomes heap_start
+    call pmm_alloc_frame
+    test eax, eax
+    jz .hi_fail
+    mov [heap_start], eax
+
+    ; Allocate remaining frames (consecutive due to linear scanner)
+    mov ecx, HEAP_INITIAL_PAGES - 1
+.hi_alloc:
+    test ecx, ecx
+    jz .hi_alloc_done
+    push ecx
+    call pmm_alloc_frame
+    pop ecx
+    test eax, eax
+    jz .hi_fail
+    dec ecx
+    jmp .hi_alloc
+
+.hi_alloc_done:
+    ; Compute heap_end
+    mov eax, [heap_start]
+    add eax, HEAP_INITIAL_PAGES * PAGE_SIZE
+    mov [heap_end], eax
+
+    ; Plant the initial free block spanning the entire heap
+    mov edi, [heap_start]
+    mov dword [edi + 0], HEAP_INITIAL_PAGES * PAGE_SIZE - HEAP_HEADER_SIZE
+    mov dword [edi + 4], HEAP_FREE
+
+    call heap_print_summary
+    call heap_self_test
+    jmp .hi_done
+
+.hi_fail:
+    mov esi, serial_msg_heap_fail
+    call serial_write_str
+
+.hi_done:
+    pop edi
+    pop ecx
+    pop eax
+    ret
+
+; kmalloc — allocate size bytes from the kernel heap
+; IN:  EAX = requested size (bytes, > 0)
+; OUT: EAX = pointer to allocated memory, or 0 if OOM
+kmalloc:
+    push ebx
+    push ecx
+    push edx
+    push esi
+    push edi
+
+    ; Round size up to HEAP_ALIGN
+    add eax, HEAP_ALIGN - 1
+    and eax, 0xFFFFFFF8
+    mov ecx, eax
+
+    mov esi, [heap_start]
+    mov edi, [heap_end]
+
+.km_scan:
+    cmp esi, edi
+    jge .km_oom
+
+    mov eax, [esi + 0]
+    mov edx, [esi + 4]
+
+    test edx, HEAP_USED
+    jnz .km_next
+
+    cmp eax, ecx
+    jl .km_next
+
+    ; Free block big enough — split if worthwhile
+    mov ebx, eax
+    sub ebx, ecx
+    cmp ebx, HEAP_HEADER_SIZE + HEAP_ALIGN
+    jle .km_no_split
+
+    ; Create new free block after this one
+    lea edx, [esi + HEAP_HEADER_SIZE + ecx]
+    sub ebx, HEAP_HEADER_SIZE
+    mov [edx + 0], ebx
+    mov dword [edx + 4], HEAP_FREE
+
+    ; Shrink current block to exact requested size
+    mov [esi + 0], ecx
+
+.km_no_split:
+    mov dword [esi + 4], HEAP_USED
+
+    lea eax, [esi + HEAP_HEADER_SIZE]
+
+    pop edi
+    pop esi
+    pop edx
+    pop ecx
+    pop ebx
+    ret
+
+.km_next:
+    add esi, HEAP_HEADER_SIZE
+    add esi, eax
+    jmp .km_scan
+
+.km_oom:
+    xor eax, eax
+    pop edi
+    pop esi
+    pop edx
+    pop ecx
+    pop ebx
+    ret
+
+; kfree — release a kmalloc'd pointer
+; IN:  EAX = pointer returned by kmalloc (NULL is a safe no-op)
+kfree:
+    push eax
+    push ebx
+    push ecx
+    push edx
+
+    test eax, eax
+    jz .kf_done
+
+    sub eax, HEAP_HEADER_SIZE
+    mov dword [eax + 4], HEAP_FREE
+
+    ; Try to coalesce with next block
+    mov ebx, [eax + 0]
+    lea ecx, [eax + HEAP_HEADER_SIZE + ebx]
+    cmp ecx, [heap_end]
+    jge .kf_done
+
+    cmp dword [ecx + 4], HEAP_FREE
+    jne .kf_done
+
+    ; Absorb next block: size += next_size + header
+    mov edx, [ecx + 0]
+    add edx, HEAP_HEADER_SIZE
+    add [eax + 0], edx
+
+.kf_done:
+    pop edx
+    pop ecx
+    pop ebx
+    pop eax
+    ret
+
+; heap_self_test — allocate, free, reallocate and log to serial
+heap_self_test:
+    push eax
+    push ebx
+    push ecx
+
+    mov esi, serial_msg_heap_test
+    call serial_write_str
+
+    ; Alloc A (32 bytes)
+    mov eax, 32
+    call kmalloc
+    mov ebx, eax
+    mov esi, serial_msg_heap_a
+    call serial_write_str
+    mov eax, ebx
+    call serial_write_hex32
+    mov esi, serial_msg_crlf
+    call serial_write_str
+
+    ; Alloc B (64 bytes)
+    mov eax, 64
+    call kmalloc
+    mov ecx, eax
+    mov esi, serial_msg_heap_b
+    call serial_write_str
+    mov eax, ecx
+    call serial_write_hex32
+    mov esi, serial_msg_crlf
+    call serial_write_str
+
+    ; Alloc C (16 bytes)
+    mov eax, 16
+    call kmalloc
+    push eax
+    mov esi, serial_msg_heap_c
+    call serial_write_str
+    pop eax
+    push eax
+    call serial_write_hex32
+    mov esi, serial_msg_crlf
+    call serial_write_str
+    pop eax
+
+    ; Free B
+    mov eax, ecx
+    call kfree
+
+    ; Alloc D (48 bytes) — should reuse B's slot
+    mov eax, 48
+    call kmalloc
+    push eax
+    mov esi, serial_msg_heap_d
+    call serial_write_str
+    pop eax
+    push eax
+    call serial_write_hex32
+    mov esi, serial_msg_crlf
+    call serial_write_str
+    pop eax
+
+    pop ecx
+    pop ebx
+    pop eax
+    ret
+
+; heap_print_summary — log heap range to serial + VGA row 11
+heap_print_summary:
+    push eax
+    push ebx
+    push esi
+    push edi
+
+    mov esi, serial_msg_heap_hdr
+    call serial_write_str
+
+    mov esi, serial_msg_heap_start
+    call serial_write_str
+    mov eax, [heap_start]
+    call serial_write_hex32
+    mov esi, serial_msg_crlf
+    call serial_write_str
+
+    mov esi, serial_msg_heap_end
+    call serial_write_str
+    mov eax, [heap_end]
+    call serial_write_hex32
+    mov esi, serial_msg_crlf
+    call serial_write_str
+
+    mov esi, serial_msg_heap_size
+    call serial_write_str
+    mov eax, [heap_end]
+    sub eax, [heap_start]
+    shr eax, 10
+    call serial_write_hex32
+    mov esi, serial_msg_heap_kib
+    call serial_write_str
+
+    ; VGA row 11: "Heap: 0xNNNN-0xNNNN (256 KiB)"
+    mov edi, 0xB8000 + (80*11*2)
+    mov bl, 0x0B
+    mov esi, msg_heap_range
+    call vga_print
+    mov eax, [heap_start]
+    call vga_print_hex32
+    mov esi, msg_heap_dash
+    call vga_print
+    mov eax, [heap_end]
+    call vga_print_hex32
+
+    pop edi
+    pop esi
+    pop ebx
+    pop eax
+    ret
+
 ; -----------------------
 ; Serial (COM1) logging
 ; -----------------------
@@ -1523,6 +1815,20 @@ serial_msg_pg_enabling db "  enabling CR0.PG...", 13, 10, 0
 serial_msg_pg_on       db "  paging ENABLED", 13, 10, 0
 serial_msg_pg_oom      db "PAGING: OOM!", 13, 10, 0
 msg_paging             db "Paging ON  CR3=0x", 0
+
+serial_msg_heap_hdr    db "== Heap ==", 13, 10, 0
+serial_msg_heap_start  db "  start: 0x", 0
+serial_msg_heap_end    db "  end:   0x", 0
+serial_msg_heap_size   db "  size:  0x", 0
+serial_msg_heap_kib    db " KiB", 13, 10, 0
+serial_msg_heap_fail   db "HEAP: alloc failed!", 13, 10, 0
+serial_msg_heap_test   db "== Heap Test ==", 13, 10, 0
+serial_msg_heap_a      db "  A(32):  0x", 0
+serial_msg_heap_b      db "  B(64):  0x", 0
+serial_msg_heap_c      db "  C(16):  0x", 0
+serial_msg_heap_d      db "  D(48):  0x", 0
+msg_heap_range         db "Heap: 0x", 0
+msg_heap_dash          db "-0x", 0
 
 ; The `s*` variables represent debug text identifiers.
 s0          db " S0=",0
