@@ -8,4 +8,7 @@ SECTIONS
   .rodata : { *(.rodata*) }
   .data : { *(.data*) }
   .bss : { *(.bss*) *(COMMON) }
+
+  . = ALIGN(4096);
+  _kernel_end = .;
 }

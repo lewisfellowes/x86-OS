@@ -20,11 +20,20 @@ BOOT_INFO_ADDR    equ 0x6000
 BOOTINFO_MAGIC    equ 0x1BADB002
 E820_ENTRY_SIZE   equ 20
 
+PAGE_SIZE         equ 4096
+PAGE_SHIFT        equ 12
+
+extern _kernel_end
+
 section .bss
 align 4
 boot_info_ptr     resd 1
 tick_count        resd 1
 last_scancode     resb 1
+pmm_bitmap        resd 1
+pmm_bitmap_size   resd 1
+pmm_total_frames  resd 1
+pmm_free_frames   resd 1
 
 section .text
 _start:
@@ -61,6 +70,9 @@ _start:
 
     ; Print E820 memory map to serial + usable RAM total to VGA
     call print_memory_map
+
+    ; Initialize physical memory manager (bitmap allocator)
+    call pmm_init
 
     ; Init IDT and load it
     call idt_init
@@ -610,6 +622,414 @@ print_memory_map:
     pop eax
     ret
 
+; ==============================
+; Physical Memory Manager (PMM)
+; ==============================
+; Bitmap allocator: one bit per 4 KiB page frame.
+;   bit = 1 -> used,  bit = 0 -> free
+; Bitmap is placed at the first page boundary after _kernel_end.
+
+; pmm_init — build frame bitmap from E820 memory map
+pmm_init:
+    push eax
+    push ebx
+    push ecx
+    push edx
+    push esi
+    push edi
+    push ebp
+
+    mov eax, [boot_info_ptr]
+    test eax, eax
+    jz .pi_fail
+
+    mov ecx, [eax + 16]
+    test ecx, ecx
+    jz .pi_fail
+
+    mov esi, [eax + 12]
+    test esi, esi
+    jz .pi_fail
+
+    ; --- Find highest end-of-usable-region (32-bit only) ---
+    push ecx
+    push esi
+    xor ebp, ebp
+
+.pi_find_top:
+    cmp dword [esi + 16], 1
+    jne .pi_ft_next
+    cmp dword [esi + 4], 0
+    jne .pi_ft_next
+    mov eax, [esi + 0]
+    add eax, [esi + 8]
+    jc .pi_ft_next
+    cmp eax, ebp
+    jbe .pi_ft_next
+    mov ebp, eax
+
+.pi_ft_next:
+    add esi, E820_ENTRY_SIZE
+    dec ecx
+    jnz .pi_find_top
+
+    pop esi
+    pop ecx
+
+    ; EBP = highest usable address
+    mov eax, ebp
+    shr eax, PAGE_SHIFT
+    mov [pmm_total_frames], eax
+
+    ; bitmap_size = ceil(total_frames / 8)
+    add eax, 7
+    shr eax, 3
+    mov [pmm_bitmap_size], eax
+
+    ; Place bitmap at first page boundary after kernel
+    mov ebx, _kernel_end
+    add ebx, PAGE_SIZE - 1
+    and ebx, 0xFFFFF000
+    mov [pmm_bitmap], ebx
+
+    ; Fill bitmap with 0xFF (everything marked used)
+    mov edi, ebx
+    mov ecx, [pmm_bitmap_size]
+    mov al, 0xFF
+    rep stosb
+
+    ; Walk E820: mark usable (type 1) regions as free
+    mov eax, [boot_info_ptr]
+    mov ecx, [eax + 16]
+    mov esi, [eax + 12]
+
+.pi_mark_free:
+    cmp dword [esi + 16], 1
+    jne .pi_mf_next
+    push ecx
+    push esi
+    mov eax, [esi + 0]
+    mov edx, [esi + 8]
+    call pmm_mark_region_free
+    pop esi
+    pop ecx
+
+.pi_mf_next:
+    add esi, E820_ENTRY_SIZE
+    dec ecx
+    jnz .pi_mark_free
+
+    ; Re-mark low memory 0 – 1 MiB as used (BIOS, boot structs, etc.)
+    xor eax, eax
+    mov edx, 0x100000
+    call pmm_mark_region_used
+
+    ; Re-mark kernel + bitmap as used
+    mov eax, 0x100000
+    mov edx, [pmm_bitmap]
+    add edx, [pmm_bitmap_size]
+    sub edx, eax
+    call pmm_mark_region_used
+
+    call pmm_count_free
+    call pmm_print_summary
+    jmp .pi_done
+
+.pi_fail:
+    mov esi, serial_msg_pmm_fail
+    call serial_write_str
+
+.pi_done:
+    pop ebp
+    pop edi
+    pop esi
+    pop edx
+    pop ecx
+    pop ebx
+    pop eax
+    ret
+
+; pmm_mark_region_free — clear bits for frames fully inside [base, base+len)
+; IN: EAX = base physical address, EDX = length in bytes
+pmm_mark_region_free:
+    push eax
+    push ebx
+    push ecx
+    push edx
+    push esi
+    push edi
+    push ebp
+
+    ; end_frame = (base + length) >> PAGE_SHIFT  (round down)
+    lea ebp, [eax + edx]
+    shr ebp, PAGE_SHIFT
+
+    ; start_frame = ceil(base / PAGE_SIZE)
+    add eax, PAGE_SIZE - 1
+    shr eax, PAGE_SHIFT
+
+    cmp eax, ebp
+    jge .mrf_done
+
+    mov esi, eax
+    mov edi, [pmm_bitmap]
+
+.mrf_loop:
+    cmp esi, ebp
+    jge .mrf_done
+
+    mov eax, esi
+    shr eax, 3
+    mov ecx, esi
+    and ecx, 7
+
+    mov ebx, 1
+    shl ebx, cl
+    not bl
+    and [edi + eax], bl
+
+    inc esi
+    jmp .mrf_loop
+
+.mrf_done:
+    pop ebp
+    pop edi
+    pop esi
+    pop edx
+    pop ecx
+    pop ebx
+    pop eax
+    ret
+
+; pmm_mark_region_used — set bits for frames overlapping [base, base+len)
+; IN: EAX = base physical address, EDX = length in bytes
+pmm_mark_region_used:
+    push eax
+    push ebx
+    push ecx
+    push edx
+    push esi
+    push edi
+    push ebp
+
+    ; end_frame = ceil((base + length) / PAGE_SIZE)
+    add edx, eax
+    add edx, PAGE_SIZE - 1
+    shr edx, PAGE_SHIFT
+    mov ebp, edx
+
+    ; start_frame = base >> PAGE_SHIFT  (round down, conservative)
+    shr eax, PAGE_SHIFT
+
+    cmp eax, ebp
+    jge .mru_done
+
+    mov esi, eax
+    mov edi, [pmm_bitmap]
+
+.mru_loop:
+    cmp esi, ebp
+    jge .mru_done
+
+    mov eax, esi
+    shr eax, 3
+    mov ecx, esi
+    and ecx, 7
+
+    mov ebx, 1
+    shl ebx, cl
+    or [edi + eax], bl
+
+    inc esi
+    jmp .mru_loop
+
+.mru_done:
+    pop ebp
+    pop edi
+    pop esi
+    pop edx
+    pop ecx
+    pop ebx
+    pop eax
+    ret
+
+; pmm_count_free — count 0-bits in bitmap, store in pmm_free_frames
+pmm_count_free:
+    push eax
+    push ebx
+    push ecx
+    push edx
+    push esi
+
+    mov esi, [pmm_bitmap]
+    mov ecx, [pmm_bitmap_size]
+    xor edx, edx
+
+.pcf_byte:
+    test ecx, ecx
+    jz .pcf_done
+
+    lodsb
+    not al
+    movzx eax, al
+
+.pcf_pop:
+    test eax, eax
+    jz .pcf_next
+    lea ebx, [eax - 1]
+    and eax, ebx
+    inc edx
+    jmp .pcf_pop
+
+.pcf_next:
+    dec ecx
+    jmp .pcf_byte
+
+.pcf_done:
+    mov [pmm_free_frames], edx
+
+    pop esi
+    pop edx
+    pop ecx
+    pop ebx
+    pop eax
+    ret
+
+; pmm_alloc_frame — find first free frame, mark used, return address
+; OUT: EAX = physical address (page-aligned), or 0 if OOM
+pmm_alloc_frame:
+    push ebx
+    push ecx
+    push edx
+    push edi
+
+    mov edi, [pmm_bitmap]
+    mov ecx, [pmm_bitmap_size]
+    xor edx, edx
+
+.paf_scan:
+    cmp edx, ecx
+    jge .paf_oom
+
+    cmp byte [edi + edx], 0xFF
+    jne .paf_found
+    inc edx
+    jmp .paf_scan
+
+.paf_found:
+    movzx eax, byte [edi + edx]
+    not al
+    movzx eax, al
+    bsf ecx, eax
+
+    mov ebx, 1
+    shl ebx, cl
+    or [edi + edx], bl
+
+    dec dword [pmm_free_frames]
+
+    ; frame = byte_index * 8 + bit_index
+    shl edx, 3
+    add edx, ecx
+    shl edx, PAGE_SHIFT
+    mov eax, edx
+
+    pop edi
+    pop edx
+    pop ecx
+    pop ebx
+    ret
+
+.paf_oom:
+    xor eax, eax
+    pop edi
+    pop edx
+    pop ecx
+    pop ebx
+    ret
+
+; pmm_free_frame — mark a frame as free
+; IN: EAX = physical address (page-aligned)
+pmm_free_frame:
+    push eax
+    push ebx
+    push ecx
+    push edx
+    push edi
+
+    mov edi, [pmm_bitmap]
+
+    shr eax, PAGE_SHIFT
+    mov edx, eax
+    shr edx, 3
+    mov ecx, eax
+    and ecx, 7
+
+    mov ebx, 1
+    shl ebx, cl
+    not bl
+    and [edi + edx], bl
+
+    inc dword [pmm_free_frames]
+
+    pop edi
+    pop edx
+    pop ecx
+    pop ebx
+    pop eax
+    ret
+
+; pmm_print_summary — log PMM state to serial and VGA row 7
+pmm_print_summary:
+    push eax
+    push ebx
+    push esi
+    push edi
+
+    mov esi, serial_msg_pmm_hdr
+    call serial_write_str
+
+    mov esi, serial_msg_pmm_bitmap
+    call serial_write_str
+    mov eax, [pmm_bitmap]
+    call serial_write_hex32
+    mov esi, serial_msg_crlf
+    call serial_write_str
+
+    mov esi, serial_msg_pmm_total
+    call serial_write_str
+    mov eax, [pmm_total_frames]
+    call serial_write_hex32
+    mov esi, serial_msg_crlf
+    call serial_write_str
+
+    mov esi, serial_msg_pmm_free
+    call serial_write_str
+    mov eax, [pmm_free_frames]
+    call serial_write_hex32
+    mov esi, serial_msg_crlf
+    call serial_write_str
+
+    ; VGA row 7: "PMM: 0xNNNN/0xNNNN frames"
+    mov edi, 0xB8000 + (80*7*2)
+    mov bl, 0x0B
+    mov esi, msg_pmm_summary
+    call vga_print
+    mov eax, [pmm_free_frames]
+    call vga_print_hex32
+    mov esi, msg_pmm_slash
+    call vga_print
+    mov eax, [pmm_total_frames]
+    call vga_print_hex32
+    mov esi, msg_pmm_frames
+    call vga_print
+
+    pop edi
+    pop esi
+    pop ebx
+    pop eax
+    ret
+
 ; -----------------------
 ; Serial (COM1) logging
 ; -----------------------
@@ -929,6 +1349,18 @@ serial_msg_e820_len  db " len=", 0
 serial_msg_e820_type db " type=", 0
 serial_msg_ram_total db "Usable RAM: 0x", 0
 msg_ram_total        db "Usable RAM: 0x", 0
+
+serial_msg_pmm_hdr     db "== PMM Init ==", 13, 10, 0
+serial_msg_pmm_bitmap  db "  bitmap at: 0x", 0
+serial_msg_pmm_total   db "  total frames: 0x", 0
+serial_msg_pmm_free    db "  free frames:  0x", 0
+serial_msg_pmm_fail    db "PMM: no memory map!", 13, 10, 0
+serial_msg_pmm_test    db "== PMM Test ==", 13, 10, 0
+serial_msg_pmm_alloc   db "  alloc: 0x", 0
+serial_msg_pmm_realloc db "  realloc: 0x", 0
+msg_pmm_summary        db "PMM: 0x", 0
+msg_pmm_slash          db "/0x", 0
+msg_pmm_frames         db " frames", 0
 
 ; The `s*` variables represent debug text identifiers.
 s0          db " S0=",0
