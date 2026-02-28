@@ -1,7 +1,7 @@
-#include "window.h"
-#include "../heap.h"
-#include "../string.h"
-#include "../serial.h"
+#include "gui/window.h"
+#include "mem/heap.h"
+#include "lib/string.h"
+#include "drivers/serial.h"
 
 static window_t windows[WIN_MAX];
 

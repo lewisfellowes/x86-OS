@@ -1,9 +1,8 @@
-#include "fs.h"
-#include "myfs.h"
-#include "../ata.h"
-#include "../serial.h"
-#include "../string.h"
-#include "../heap.h"
+#include "fs/fs.h"
+#include "fs/myfs.h"
+#include "drivers/ata.h"
+#include "drivers/serial.h"
+#include "lib/string.h"
 
 /* We use the second ATA drive (slave) as the filesystem disk.
  * The primary (master) holds the boot image. QEMU: -drive file=disk.img ... */

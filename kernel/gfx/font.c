@@ -1,6 +1,6 @@
-#include "font.h"
-#include "fb.h"
-#include "string.h"
+#include "gfx/font.h"
+#include "drivers/fb.h"
+#include "lib/string.h"
 
 #define VGA_FONT_ADDR 0x4000
 

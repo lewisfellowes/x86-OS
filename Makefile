@@ -79,6 +79,16 @@ run-fdd: $(BUILD)/os.img $(BUILD)/disk.img
 		-drive format=raw,file=$(BUILD)/disk.img,if=ide,index=1 \
 		-boot a -serial stdio -no-reboot
 
+compile_commands.json: $(KERNEL_C_SRC)
+	@echo "[" > $@
+	@first=1; for f in $(KERNEL_C_SRC); do \
+		if [ $$first -eq 0 ]; then echo "  ,"; fi >> $@; \
+		printf '  { "directory": "%s", "command": "$(CC) $(CFLAGS) -c %s", "file": "%s" }\n' \
+			"$$(pwd)" "$$f" "$$f" >> $@; \
+		first=0; \
+	done
+	@echo "]" >> $@
+
 clean:
 	rm -rf $(BUILD)
 

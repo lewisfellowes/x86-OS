@@ -1,9 +1,8 @@
-#include "syscall.h"
-#include "idt.h"
-#include "serial.h"
-#include "process.h"
+#include "proc/syscall.h"
+#include "arch/idt.h"
+#include "drivers/serial.h"
+#include "proc/process.h"
 #include "fs/fs.h"
-#include "string.h"
 
 static void syscall_handler(isr_frame_t *frame) {
     uint32_t num = frame->eax;

@@ -1,6 +1,6 @@
 #pragma once
-#include "window.h"
-#include "event.h"
+#include "gui/window.h"
+#include "gui/event.h"
 
 void wm_init(void);
 void wm_add_window(window_t *win);

@@ -1,6 +1,6 @@
-#include "compositor.h"
-#include "wm.h"
-#include "desktop.h"
+#include "gui/compositor.h"
+#include "gui/wm.h"
+#include "gui/desktop.h"
 
 void compositor_init(void) {
     /* placeholder for future dirty-rect tracking */

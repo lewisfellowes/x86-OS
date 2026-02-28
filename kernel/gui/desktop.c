@@ -1,10 +1,12 @@
-#include "desktop.h"
-#include "clock.h"
-#include "widget.h"
-#include "wm.h"
-#include "../fb.h"
-#include "../font.h"
-#include "../string.h"
+#include "gui/desktop.h"
+#include "gui/clock.h"
+#include "gui/widget.h"
+#include "gui/wm.h"
+#include "drivers/fb.h"
+#include "gfx/font.h"
+
+#include <stddef.h>
+#include <stdint.h>
 
 /* forward declarations for app launchers */
 extern void app_terminal_open(void);
@@ -17,7 +19,7 @@ static uint32_t last_second;
 /* ---------- gradient ---------- */
 
 static void draw_gradient(void) {
-    volatile uint32_t *fb = (volatile uint32_t *)fb_get_addr();
+    uint32_t *fb = (uint32_t *)(uintptr_t)fb_get_addr();
     if (!fb) return;
 
     for (int band = 0; band < 22; band++) {
@@ -109,10 +111,12 @@ void desktop_handle_event(const event_t *ev) {
     }
 }
 
-void desktop_update(uint32_t ticks, uint32_t hz) {
+int desktop_update(uint32_t ticks, uint32_t hz) {
     uint32_t sec = ticks / hz;
     if (sec != last_second) {
         last_second = sec;
         clock_draw(ticks, hz);
+        return 1;
     }
+    return 0;
 }

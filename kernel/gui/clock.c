@@ -1,6 +1,6 @@
-#include "clock.h"
-#include "../fb.h"
-#include "../font.h"
+#include "gui/clock.h"
+#include "drivers/fb.h"
+#include "gfx/font.h"
 
 void clock_draw(uint32_t ticks, uint32_t hz) {
     uint32_t total_secs = ticks / hz;

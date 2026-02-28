@@ -1,24 +1,21 @@
-#include "boot_info.h"
-#include "serial.h"
-#include "string.h"
-#include "io.h"
-#include "gdt.h"
-#include "idt.h"
-#include "pic.h"
-#include "pit.h"
-#include "kbd.h"
-#include "pmm.h"
-#include "paging.h"
-#include "heap.h"
-#include "fb.h"
-#include "font.h"
-#include "cursor.h"
-#include "mouse.h"
-#include "ata.h"
+#include "arch/boot_info.h"
+#include "drivers/serial.h"
+#include "arch/io.h"
+#include "arch/gdt.h"
+#include "arch/idt.h"
+#include "arch/pic.h"
+#include "arch/pit.h"
+#include "drivers/kbd.h"
+#include "mem/pmm.h"
+#include "mem/paging.h"
+#include "mem/heap.h"
+#include "drivers/fb.h"
+#include "gfx/cursor.h"
+#include "drivers/mouse.h"
+#include "drivers/ata.h"
 #include "fs/fs.h"
-#include "elf.h"
-#include "process.h"
-#include "syscall.h"
+#include "proc/process.h"
+#include "proc/syscall.h"
 #include "gui/event.h"
 #include "gui/desktop.h"
 #include "gui/wm.h"
@@ -63,6 +60,7 @@ void kmain(boot_info_t *bi) {
     desktop_draw();
 
     cursor_draw(mouse_get_state()->x, mouse_get_state()->y);
+    fb_flip();
     sti();
 
     serial_puts("kernel: entering event loop\r\n");
@@ -72,9 +70,13 @@ void kmain(boot_info_t *bi) {
     for (;;) {
         hlt();
 
+        int dirty = 0;
+
+        /* Collect mouse events */
         mouse_state_t *ms = mouse_get_state();
         if (ms->updated) {
             mouse_clear_update();
+            dirty = 1;
 
             event_t ev;
             ev.type    = EVENT_MOUSE_MOVE;
@@ -96,8 +98,10 @@ void kmain(boot_info_t *bi) {
             prev_buttons = ms->buttons;
         }
 
+        /* Collect keyboard events */
         while (kbd_has_key()) {
             uint8_t sc = kbd_get_scancode();
+            dirty = 1;
             event_t ev;
             if (sc & 0x80) {
                 ev.type = EVENT_KEY_UP;
@@ -110,24 +114,37 @@ void kmain(boot_info_t *bi) {
             event_push(&ev);
         }
 
-        int needs_redraw = 0;
+        /* Dispatch events — track if scene needs full redraw */
+        int needs_scene_redraw = 0;
         event_t ev;
         while (event_poll(&ev)) {
             desktop_handle_event(&ev);
             if (ev.type != EVENT_MOUSE_MOVE)
-                needs_redraw = 1;
+                needs_scene_redraw = 1;
         }
 
-        cli();
+        /* Clock tick may also dirty the screen */
+        int clock_changed = desktop_update(pit_get_ticks(), 100);
+        if (clock_changed)
+            dirty = 1;
+
+        /*
+         * All drawing targets the invisible back buffer.
+         * The user sees nothing until fb_flip().
+         */
         cursor_erase();
 
-        if (needs_redraw)
+        if (needs_scene_redraw) {
             compositor_redraw_all();
+            dirty = 1;
+        }
 
-        desktop_update(pit_get_ticks(), 100);
         wm_compose();
-
         cursor_draw(ms->x, ms->y);
-        sti();
+
+        /* Single
+         * memcpy to the visible LFB — flicker-free */
+        if (dirty)
+            fb_flip();
     }
 }

@@ -1,6 +1,6 @@
-#include "pmm.h"
-#include "serial.h"
-#include "string.h"
+#include "mem/pmm.h"
+#include "drivers/serial.h"
+#include "lib/string.h"
 
 extern uint8_t _kernel_end;
 

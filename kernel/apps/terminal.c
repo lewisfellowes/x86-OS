@@ -1,10 +1,9 @@
-#include "../gui/window.h"
-#include "../gui/wm.h"
-#include "../font.h"
-#include "../fb.h"
-#include "../string.h"
-#include "../serial.h"
-#include "../kbd.h"
+#include "gui/window.h"
+#include "gui/wm.h"
+#include "gfx/font.h"
+#include "drivers/fb.h"
+#include "lib/string.h"
+#include "drivers/kbd.h"
 
 #define TERM_COLS 48
 #define TERM_ROWS 14

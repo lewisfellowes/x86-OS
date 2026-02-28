@@ -1,4 +1,4 @@
-#include "event.h"
+#include "gui/event.h"
 
 #define EVENT_BUF_SIZE 128
 

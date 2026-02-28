@@ -1,7 +1,7 @@
-#include "paging.h"
-#include "pmm.h"
-#include "serial.h"
-#include "string.h"
+#include "mem/paging.h"
+#include "mem/pmm.h"
+#include "drivers/serial.h"
+#include "lib/string.h"
 
 #define PTE_PRESENT  0x01
 #define PTE_WRITABLE 0x02

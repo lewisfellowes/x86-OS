@@ -1,9 +1,9 @@
-#include "wm.h"
-#include "widget.h"
-#include "../fb.h"
-#include "../font.h"
-#include "../string.h"
-#include "../serial.h"
+#include "gui/wm.h"
+#include "gui/widget.h"
+#include "drivers/fb.h"
+#include "gfx/font.h"
+#include "lib/string.h"
+#include "drivers/serial.h"
 
 #define MAX_ZORDER 16
 

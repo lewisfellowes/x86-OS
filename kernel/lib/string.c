@@ -1,4 +1,4 @@
-#include "string.h"
+#include "lib/string.h"
 
 void *memset(void *dest, int val, size_t n) {
     uint8_t *d = (uint8_t *)dest;

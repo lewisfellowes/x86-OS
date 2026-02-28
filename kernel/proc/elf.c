@@ -1,6 +1,6 @@
-#include "elf.h"
-#include "string.h"
-#include "serial.h"
+#include "proc/elf.h"
+#include "lib/string.h"
+#include "drivers/serial.h"
 
 bool elf_load(const void *data, uint32_t size, elf_loaded_t *out) {
     if (size < sizeof(elf32_ehdr_t)) return false;

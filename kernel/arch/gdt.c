@@ -1,4 +1,4 @@
-#include "gdt.h"
+#include "arch/gdt.h"
 
 typedef struct {
     uint16_t limit_low;
@@ -17,7 +17,7 @@ typedef struct {
 static gdt_entry_t gdt[5];
 static gdt_ptr_t   gdtr;
 
-extern void gdt_flush(uint32_t gdtr_ptr); /* in gdt_asm.asm */
+extern void gdt_flush(uint32_t gdtr_ptr); /* in gdt_flush.asm */
 
 static void gdt_set_entry(int i, uint32_t base, uint32_t limit,
                            uint8_t access, uint8_t gran) {

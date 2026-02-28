@@ -1,9 +1,9 @@
-#include "../gui/window.h"
-#include "../gui/wm.h"
-#include "../gui/widget.h"
-#include "../font.h"
-#include "../fb.h"
-#include "../string.h"
+#include "gui/window.h"
+#include "gui/wm.h"
+#include "gui/widget.h"
+#include "gfx/font.h"
+#include "drivers/fb.h"
+#include "lib/string.h"
 
 #define CALC_W 200
 #define CALC_H 260

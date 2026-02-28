@@ -1,7 +1,7 @@
-#include "idt.h"
-#include "pic.h"
-#include "serial.h"
-#include "io.h"
+#include "arch/idt.h"
+#include "arch/pic.h"
+#include "drivers/serial.h"
+#include "arch/io.h"
 
 #define IDT_ENTRIES 256
 

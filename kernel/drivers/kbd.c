@@ -1,7 +1,7 @@
-#include "kbd.h"
-#include "idt.h"
-#include "pic.h"
-#include "io.h"
+#include "drivers/kbd.h"
+#include "arch/idt.h"
+#include "arch/pic.h"
+#include "arch/io.h"
 
 #define KBD_BUF_SIZE 64
 

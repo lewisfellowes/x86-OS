@@ -1,6 +1,6 @@
-#include "widget.h"
-#include "../fb.h"
-#include "../font.h"
+#include "gui/widget.h"
+#include "drivers/fb.h"
+#include "gfx/font.h"
 
 void widget_draw_button(int x, int y, int w, int h,
                         const char *label, uint32_t bg, uint32_t fg) {

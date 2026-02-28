@@ -1,9 +1,9 @@
-#include "../gui/window.h"
-#include "../gui/wm.h"
-#include "../font.h"
-#include "../fb.h"
-#include "../pmm.h"
-#include "../pit.h"
+#include "gui/window.h"
+#include "gui/wm.h"
+#include "gfx/font.h"
+#include "drivers/fb.h"
+#include "mem/pmm.h"
+#include "arch/pit.h"
 
 #define ABOUT_W 300
 #define ABOUT_H 200

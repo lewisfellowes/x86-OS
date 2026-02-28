@@ -1,5 +1,5 @@
-#include "cursor.h"
-#include "fb.h"
+#include "gfx/cursor.h"
+#include "drivers/fb.h"
 
 static const uint8_t cursor_data[CURSOR_H][CURSOR_W] = {
     {1,0,0,0,0,0,0,0},

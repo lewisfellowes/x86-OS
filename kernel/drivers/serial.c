@@ -1,5 +1,5 @@
-#include "serial.h"
-#include "io.h"
+#include "drivers/serial.h"
+#include "arch/io.h"
 
 void serial_init(void) {
     outb(COM1_PORT + 1, 0x00);   /* disable interrupts */

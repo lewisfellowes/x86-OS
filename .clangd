@@ -1,0 +1,9 @@
+CompileFlags:
+  Add:
+    - -Ikernel
+    - --target=i686-unknown-elf
+    - -ffreestanding
+    - -std=c11
+    - -mno-sse
+Diagnostics:
+  UnusedIncludes: None

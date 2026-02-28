@@ -1,6 +1,6 @@
 #pragma once
 #include <stdint.h>
-#include "boot_info.h"
+#include "arch/boot_info.h"
 
 #define PAGE_SIZE  4096
 #define PAGE_SHIFT 12

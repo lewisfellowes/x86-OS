@@ -12,3 +12,4 @@ uint32_t fb_get_addr(void);
 void     fb_fill_rect(int x, int y, int w, int h, uint32_t color);
 void     fb_set_pixel(int x, int y, uint32_t color);
 uint32_t fb_get_pixel(int x, int y);
+void     fb_flip(void);

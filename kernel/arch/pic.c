@@ -1,5 +1,5 @@
-#include "pic.h"
-#include "io.h"
+#include "arch/pic.h"
+#include "arch/io.h"
 
 void pic_remap(void) {
     outb(PIC1_CMD,  0x11);   io_wait();

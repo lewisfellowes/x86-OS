@@ -1,7 +1,7 @@
-#include "heap.h"
-#include "pmm.h"
-#include "serial.h"
-#include "string.h"
+#include "mem/heap.h"
+#include "mem/pmm.h"
+#include "drivers/serial.h"
+#include "lib/string.h"
 
 #define HEAP_PAGES   64
 #define HEADER_SIZE  8

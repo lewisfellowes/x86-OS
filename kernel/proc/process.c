@@ -1,8 +1,8 @@
-#include "process.h"
-#include "heap.h"
-#include "serial.h"
-#include "string.h"
-#include "io.h"
+#include "proc/process.h"
+#include "mem/heap.h"
+#include "drivers/serial.h"
+#include "lib/string.h"
+#include "arch/io.h"
 
 extern void task_switch(uint32_t *old_esp, uint32_t new_esp);
 

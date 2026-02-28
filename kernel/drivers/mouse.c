@@ -1,9 +1,9 @@
-#include "mouse.h"
-#include "idt.h"
-#include "pic.h"
-#include "io.h"
-#include "serial.h"
-#include "fb.h"
+#include "drivers/mouse.h"
+#include "arch/idt.h"
+#include "arch/pic.h"
+#include "arch/io.h"
+#include "drivers/serial.h"
+#include "drivers/fb.h"
 
 static mouse_state_t state;
 static uint8_t cycle;

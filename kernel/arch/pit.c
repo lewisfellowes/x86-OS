@@ -1,7 +1,7 @@
-#include "pit.h"
-#include "idt.h"
-#include "pic.h"
-#include "io.h"
+#include "arch/pit.h"
+#include "arch/idt.h"
+#include "arch/pic.h"
+#include "arch/io.h"
 
 #define PIT_CHANNEL0 0x40
 #define PIT_COMMAND  0x43
