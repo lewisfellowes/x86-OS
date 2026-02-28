@@ -57,14 +57,14 @@ process/syscall model. Runs in QEMU.
 - **Window creation/close/move** with title bar, close button, and drop shadow
 - **Z-order management** with focus tracking
 - **Title bar dragging** for window repositioning
-- **Event routing** -- keyboard events to focused window, mouse events to hit-tested window
+- **Event routing** -- keyboard events to focused window, mouse events to hit-tested window; clicks on windows are consumed (no click-through to desktop icons)
 - **Compositor** that redraws desktop background, windows, and start menu overlay
 - **Keyboard shortcuts** -- Alt+F4 to close focused window, Escape to dismiss start menu
 
 ### Built-in Applications
 - **Terminal** -- command-line with `help`, `clear`, `uname`, `echo` commands; 128-line scrollback buffer with Page Up/Down; command history with Up/Down arrows
 - **File Browser** -- reads files from MyFS disk, clickable file list with content viewer
-- **Text Editor** -- opens files from MyFS, editable text buffer with cursor navigation (arrow keys, Home/End, Page Up/Down), insert/delete, status bar showing filename/line/col, Ctrl+S to save back to disk, auto-scrolling viewport
+- **Text Editor** -- menu bar with **File → New** and **File → Save**; opens/saves files on MyFS; editable buffer with cursor navigation (arrow keys, Home/End, Page Up/Down), insert/delete, status bar (filename, line/col); untitled documents save as `untitled.txt`; Ctrl+S or File → Save to save
 - **Calculator** -- 4-function calculator with button grid
 - **About** -- displays system info, RAM usage, and uptime
 
@@ -200,10 +200,11 @@ When you run `make run-hdd`, QEMU shows:
 5. A **mouse cursor** that follows your movements
 6. Click icons or Start menu entries to **open applications** in draggable windows
 7. The **Terminal** accepts commands (`help`, `clear`, `uname`, `echo`); scroll back with Page Up/Down; recall commands with Up/Down arrows
-8. The **Text Editor** opens files, lets you type and navigate, and saves with Ctrl+S
-9. The **File Browser** reads real files from the MyFS disk
-10. The **Calculator** handles basic arithmetic with a button grid
-11. Press **Alt+F4** to close the focused window; **Escape** to dismiss the Start menu
+8. The **Text Editor** has a File menu (New, Save); type and navigate, then use File → Save or Ctrl+S (untitled saves as `untitled.txt`)
+9. Clicks inside a window go to that window only—no click-through to desktop icons
+10. The **File Browser** reads real files from the MyFS disk
+11. The **Calculator** handles basic arithmetic with a button grid
+12. Press **Alt+F4** to close the focused window; **Escape** to dismiss the Start menu
 
 Serial output (in the terminal) shows boot diagnostics: memory map, PMM stats,
 paging info, heap size, ATA drive detection, filesystem mount, and more.
