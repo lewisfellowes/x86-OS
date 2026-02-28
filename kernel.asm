@@ -29,6 +29,27 @@ HEAP_USED          equ 1
 HEAP_FREE          equ 0
 HEAP_ALIGN         equ 8
 
+; Bochs Graphics Adapter (BGA) I/O ports and registers
+BGA_INDEX_PORT     equ 0x01CE
+BGA_DATA_PORT      equ 0x01CF
+BGA_REG_ID         equ 0
+BGA_REG_XRES       equ 1
+BGA_REG_YRES       equ 2
+BGA_REG_BPP        equ 3
+BGA_REG_ENABLE     equ 4
+BGA_FLAG_ENABLED   equ 0x01
+BGA_FLAG_LFB       equ 0x40
+
+; PCI configuration ports
+PCI_ADDR_PORT      equ 0x0CF8
+PCI_DATA_PORT      equ 0x0CFC
+
+; Framebuffer mode constants
+FB_WIDTH           equ 640
+FB_HEIGHT          equ 480
+FB_BPP             equ 32
+FB_PITCH           equ (FB_WIDTH * 4)
+
 extern _kernel_end
 
 section .bss
@@ -44,6 +65,7 @@ page_directory    resd 1
 paging_num_pts    resd 1
 heap_start        resd 1
 heap_end          resd 1
+fb_addr           resd 1
 
 section .text
 _start:
@@ -107,6 +129,9 @@ _start:
 
     mov esi, serial_msg_irq_on
     call serial_write_str
+
+    ; Switch to 640x480x32bpp graphics via BGA
+    call fb_init
 
     ; Enable hardware interrupts and enter idle loop
     sti
@@ -1476,6 +1501,272 @@ heap_print_summary:
     pop eax
     ret
 
+; ==============================
+; Framebuffer (BGA + PCI)
+; ==============================
+; Programs the Bochs Graphics Adapter from protected mode.
+; Reads the LFB address from PCI BAR0, sets 640x480x32bpp,
+; maps the framebuffer into the page tables, then draws a
+; simple desktop scene.
+
+fb_init:
+    push eax
+    push ebx
+    push ecx
+    push edx
+    push esi
+    push edi
+
+    ; --- Detect BGA ---
+    mov dx, BGA_INDEX_PORT
+    xor ax, ax
+    out dx, ax
+    mov dx, BGA_DATA_PORT
+    in ax, dx
+    cmp ax, 0xB0C0
+    jb .fb_no_bga
+
+    ; --- Read LFB address from PCI BAR0 ---
+    ; BGA on QEMU: bus 0, device 2, func 0, offset 0x10
+    mov eax, 0x80001010
+    mov dx, PCI_ADDR_PORT
+    out dx, eax
+    mov dx, PCI_DATA_PORT
+    in eax, dx
+    and eax, 0xFFFFFFF0
+    mov [fb_addr], eax
+
+    ; --- Set BGA mode ---
+    mov dx, BGA_INDEX_PORT
+    mov ax, BGA_REG_ENABLE
+    out dx, ax
+    mov dx, BGA_DATA_PORT
+    xor ax, ax
+    out dx, ax
+
+    mov dx, BGA_INDEX_PORT
+    mov ax, BGA_REG_XRES
+    out dx, ax
+    mov dx, BGA_DATA_PORT
+    mov ax, FB_WIDTH
+    out dx, ax
+
+    mov dx, BGA_INDEX_PORT
+    mov ax, BGA_REG_YRES
+    out dx, ax
+    mov dx, BGA_DATA_PORT
+    mov ax, FB_HEIGHT
+    out dx, ax
+
+    mov dx, BGA_INDEX_PORT
+    mov ax, BGA_REG_BPP
+    out dx, ax
+    mov dx, BGA_DATA_PORT
+    mov ax, FB_BPP
+    out dx, ax
+
+    mov dx, BGA_INDEX_PORT
+    mov ax, BGA_REG_ENABLE
+    out dx, ax
+    mov dx, BGA_DATA_PORT
+    mov ax, BGA_FLAG_ENABLED | BGA_FLAG_LFB
+    out dx, ax
+
+    ; --- Map LFB into page tables ---
+    mov eax, [fb_addr]
+    call fb_map_4mb
+
+    ; --- Clear to dark background ---
+    mov edi, [fb_addr]
+    mov ecx, FB_WIDTH * FB_HEIGHT
+    mov eax, 0x00203040
+    rep stosd
+
+    ; --- Draw test desktop ---
+    call fb_draw_desktop
+
+    ; --- Serial log ---
+    call fb_print_summary
+    jmp .fb_done
+
+.fb_no_bga:
+    mov esi, serial_msg_fb_fail
+    call serial_write_str
+
+.fb_done:
+    pop edi
+    pop esi
+    pop edx
+    pop ecx
+    pop ebx
+    pop eax
+    ret
+
+; fb_map_4mb — identity-map one 4 MiB region containing the LFB
+; IN: EAX = any address within the region (rounded down to 4 MiB)
+fb_map_4mb:
+    push eax
+    push ebx
+    push ecx
+    push edx
+    push edi
+
+    and eax, 0xFFC00000
+    mov ebx, eax
+
+    call pmm_alloc_frame
+    test eax, eax
+    jz .fm_done
+
+    push eax
+    mov edi, eax
+    mov edx, ebx
+    mov ecx, 1024
+
+.fm_fill:
+    mov eax, edx
+    or eax, 0x03
+    stosd
+    add edx, PAGE_SIZE
+    dec ecx
+    jnz .fm_fill
+
+    pop eax
+    mov edi, [page_directory]
+    mov edx, ebx
+    shr edx, 22
+    or eax, 0x03
+    mov [edi + edx*4], eax
+
+    mov eax, cr3
+    mov cr3, eax
+
+.fm_done:
+    pop edi
+    pop edx
+    pop ecx
+    pop ebx
+    pop eax
+    ret
+
+; fb_fill_rect — draw a solid-colour rectangle
+; IN: EAX=x, EBX=y, ECX=width, EDX=height, ESI=colour (0x00RRGGBB)
+fb_fill_rect:
+    push eax
+    push ebx
+    push ecx
+    push edx
+    push esi
+    push edi
+    push ebp
+
+    mov edi, [fb_addr]
+    imul ebp, ebx, FB_PITCH
+    add edi, ebp
+    lea edi, [edi + eax*4]
+
+    mov ebp, edx
+
+.fr_row:
+    test ebp, ebp
+    jz .fr_done
+    push edi
+    push ecx
+    mov eax, esi
+    rep stosd
+    pop ecx
+    pop edi
+    add edi, FB_PITCH
+    dec ebp
+    jmp .fr_row
+
+.fr_done:
+    pop ebp
+    pop edi
+    pop esi
+    pop edx
+    pop ecx
+    pop ebx
+    pop eax
+    ret
+
+; fb_draw_desktop — simple desktop scene: background, taskbar, window
+fb_draw_desktop:
+    push eax
+    push ebx
+    push ecx
+    push edx
+    push esi
+
+    ; Taskbar (bottom 40 px, dark gray)
+    xor eax, eax
+    mov ebx, FB_HEIGHT - 40
+    mov ecx, FB_WIDTH
+    mov edx, 40
+    mov esi, 0x00404050
+    call fb_fill_rect
+
+    ; Window body (300x200, centered, light gray)
+    mov eax, (FB_WIDTH - 300) / 2
+    mov ebx, 100
+    mov ecx, 300
+    mov edx, 200
+    mov esi, 0x00E8E8E8
+    call fb_fill_rect
+
+    ; Title bar (blue)
+    mov eax, (FB_WIDTH - 300) / 2
+    mov ebx, 100
+    mov ecx, 300
+    mov edx, 24
+    mov esi, 0x003060A0
+    call fb_fill_rect
+
+    ; Close button (red square, top-right of title bar)
+    mov eax, (FB_WIDTH - 300) / 2 + 300 - 20
+    mov ebx, 104
+    mov ecx, 16
+    mov edx, 16
+    mov esi, 0x00E04040
+    call fb_fill_rect
+
+    ; Green button in window body
+    mov eax, (FB_WIDTH - 300) / 2 + 20
+    mov ebx, 200
+    mov ecx, 80
+    mov edx, 30
+    mov esi, 0x0040A060
+    call fb_fill_rect
+
+    pop esi
+    pop edx
+    pop ecx
+    pop ebx
+    pop eax
+    ret
+
+; fb_print_summary — log framebuffer info to serial
+fb_print_summary:
+    push eax
+    push esi
+
+    mov esi, serial_msg_fb_hdr
+    call serial_write_str
+
+    mov esi, serial_msg_fb_addr
+    call serial_write_str
+    mov eax, [fb_addr]
+    call serial_write_hex32
+    mov esi, serial_msg_crlf
+    call serial_write_str
+
+    mov esi, serial_msg_fb_mode
+    call serial_write_str
+
+    pop esi
+    pop eax
+    ret
+
 ; -----------------------
 ; Serial (COM1) logging
 ; -----------------------
@@ -1829,6 +2120,11 @@ serial_msg_heap_c      db "  C(16):  0x", 0
 serial_msg_heap_d      db "  D(48):  0x", 0
 msg_heap_range         db "Heap: 0x", 0
 msg_heap_dash          db "-0x", 0
+
+serial_msg_fb_hdr      db "== Framebuffer ==", 13, 10, 0
+serial_msg_fb_addr     db "  LFB at: 0x", 0
+serial_msg_fb_mode     db "  mode: 640x480x32bpp", 13, 10, 0
+serial_msg_fb_fail     db "FB: BGA not detected", 13, 10, 0
 
 ; The `s*` variables represent debug text identifiers.
 s0          db " S0=",0
