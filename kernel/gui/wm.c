@@ -77,7 +77,7 @@ static bool in_close_button(window_t *w, int mx, int my) {
     return mx >= bx && mx < bx + 16 && my >= by && my < by + 16;
 }
 
-void wm_handle_event(const event_t *ev) {
+bool wm_handle_event(const event_t *ev) {
     if (ev->type == EVENT_MOUSE_DOWN) {
         window_t *hit = find_window_at(ev->mouse.x, ev->mouse.y);
         if (hit) {
@@ -85,22 +85,25 @@ void wm_handle_event(const event_t *ev) {
             if (in_close_button(hit, ev->mouse.x, ev->mouse.y)) {
                 wm_remove_window(hit);
                 window_close(hit);
-                return;
+                return true;
             }
             if (in_title_bar(hit, ev->mouse.x, ev->mouse.y)) {
                 drag_active = 1;
                 drag_win = hit;
                 drag_ox = ev->mouse.x - hit->x;
                 drag_oy = ev->mouse.y - hit->y;
-                return;
+                return true;
             }
             if (hit->on_event) {
                 int lx = ev->mouse.x - hit->x;
                 int ly = ev->mouse.y - hit->y;
                 hit->on_event(hit, WIN_EVENT_MOUSE_DOWN, lx, ly);
             }
+            return true;
         }
-    } else if (ev->type == EVENT_MOUSE_UP) {
+        return false;
+    }
+    if (ev->type == EVENT_MOUSE_UP) {
         if (drag_active) {
             drag_active = 0;
             drag_win = 0;
@@ -110,15 +113,19 @@ void wm_handle_event(const event_t *ev) {
             int lx = ev->mouse.x - hit->x;
             int ly = ev->mouse.y - hit->y;
             hit->on_event(hit, WIN_EVENT_MOUSE_UP, lx, ly);
+            return true;
         }
-    } else if (ev->type == EVENT_MOUSE_MOVE) {
+        return false;
+    }
+    if (ev->type == EVENT_MOUSE_MOVE) {
         if (drag_active && drag_win) {
             window_move(drag_win,
                         ev->mouse.x - drag_ox,
                         ev->mouse.y - drag_oy);
         }
-    } else if (ev->type == EVENT_KEY_DOWN || ev->type == EVENT_KEY_UP) {
-        /* Alt+F4 closes focused window */
+        return false;
+    }
+    if (ev->type == EVENT_KEY_DOWN || ev->type == EVENT_KEY_UP) {
         if (ev->type == EVENT_KEY_DOWN &&
             ev->key.scancode == 0x3E &&
             (kbd_get_modifiers() & KBD_MOD_ALT)) {
@@ -126,7 +133,7 @@ void wm_handle_event(const event_t *ev) {
                 window_t *top = zorder[zcount - 1];
                 wm_remove_window(top);
                 window_close(top);
-                return;
+                return true;
             }
         }
 
@@ -134,8 +141,11 @@ void wm_handle_event(const event_t *ev) {
             int t = (ev->type == EVENT_KEY_DOWN) ? WIN_EVENT_KEY_DOWN : WIN_EVENT_KEY_UP;
             zorder[zcount - 1]->on_event(zorder[zcount - 1], t,
                                           ev->key.scancode, ev->key.ascii);
+            return true;
         }
+        return false;
     }
+    return false;
 }
 
 static void draw_window_frame(window_t *w) {

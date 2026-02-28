@@ -10,8 +10,10 @@
 
 #define ED_W       480
 #define ED_H       360
+#define MENUBAR_H  20
+#define TEXTTOP    (MENUBAR_H + 2)
 #define ED_COLS    ((ED_W - 16) / FONT_CHAR_WIDTH)
-#define ED_ROWS    ((ED_H - 40) / (FONT_CHAR_HEIGHT + 2))
+#define ED_ROWS    ((ED_H - TEXTTOP - 24) / (FONT_CHAR_HEIGHT + 2))
 #define ED_BUF_MAX 8192
 
 #define SC_UP     0x48
@@ -25,6 +27,14 @@
 #define SC_CTRL   0x1D
 #define SC_S      0x1F
 
+/* File menu dropdown geometry (local coords) */
+#define FMENU_X    0
+#define FMENU_Y    MENUBAR_H
+#define FMENU_W    100
+#define FMENU_ITEM 24
+#define FMENU_ITEMS 2
+#define FMENU_H    (FMENU_ITEMS * FMENU_ITEM + 4)
+
 typedef struct {
     char     buf[ED_BUF_MAX];
     int      len;
@@ -33,10 +43,13 @@ typedef struct {
     char     filename[FS_MAX_NAME];
     bool     modified;
     bool     ctrl_held;
+    bool     file_menu_open;
 } editor_state_t;
 
 static editor_state_t es;
 static window_t *ed_win;
+
+/* ---- text helpers ---- */
 
 static int ed_line_count(void) {
     int lines = 1;
@@ -108,9 +121,11 @@ static void ed_delete_back(void) {
 }
 
 static void ed_save(void) {
-    if (es.filename[0] == '\0') return;
+    const char *name = es.filename[0] ? es.filename : "untitled.txt";
+    if (es.filename[0] == '\0')
+        strncpy(es.filename, name, FS_MAX_NAME - 1);
 
-    fd_t fd = fs_open(es.filename, FS_FLAG_WRITE | FS_FLAG_CREATE);
+    fd_t fd = fs_open(name, FS_FLAG_WRITE | FS_FLAG_CREATE);
     if (fd < 0) {
         serial_puts("ED: save failed (open)\r\n");
         return;
@@ -121,6 +136,12 @@ static void ed_save(void) {
 
     if (written >= 0) {
         es.modified = false;
+        char title[32] = "Editor - ";
+        int tp = 9;
+        for (int i = 0; es.filename[i] && tp < 30; i++)
+            title[tp++] = es.filename[i];
+        title[tp] = '\0';
+        window_set_title(ed_win, title);
         serial_puts("ED: saved '");
         serial_puts(es.filename);
         serial_puts("'\r\n");
@@ -129,13 +150,57 @@ static void ed_save(void) {
     }
 }
 
+static void ed_new_file(void) {
+    memset(es.buf, 0, ED_BUF_MAX);
+    es.len = 0;
+    es.cursor = 0;
+    es.scroll_line = 0;
+    es.filename[0] = '\0';
+    es.modified = false;
+    window_set_title(ed_win, "Editor");
+}
+
+/* ---- drawing ---- */
+
+static void draw_menubar(window_t *w) {
+    uint32_t mbg = 0x00E0E0E0;
+    uint32_t mfg = 0x00202020;
+
+    fb_fill_rect(w->x, w->y, w->w, MENUBAR_H, mbg);
+    fb_fill_rect(w->x, w->y + MENUBAR_H, w->w, 1, 0x00B0B0B0);
+
+    /* "File" button */
+    uint32_t fbg = es.file_menu_open ? 0x00C8D8F0 : mbg;
+    fb_fill_rect(w->x + 4, w->y + 2, 40, MENUBAR_H - 4, fbg);
+    font_draw_string(w->x + 8, w->y + 2, "File", mfg, fbg);
+
+    if (!es.file_menu_open) return;
+
+    /* Dropdown shadow */
+    fb_fill_rect(w->x + FMENU_X + 3, w->y + FMENU_Y + 3,
+                 FMENU_W, FMENU_H, 0x00182028);
+    /* Dropdown background */
+    fb_fill_rect(w->x + FMENU_X, w->y + FMENU_Y,
+                 FMENU_W, FMENU_H, 0x00F0F0F0);
+    fb_fill_rect(w->x + FMENU_X, w->y + FMENU_Y,
+                 FMENU_W, 1, 0x00B0B0B0);
+
+    int iy = w->y + FMENU_Y + 2;
+    font_draw_string(w->x + FMENU_X + 12, iy + 4, "New",  mfg, 0x00F0F0F0);
+    iy += FMENU_ITEM;
+    fb_fill_rect(w->x + FMENU_X + 4, iy - 1, FMENU_W - 8, 1, 0x00D0D0D0);
+    font_draw_string(w->x + FMENU_X + 12, iy + 4, "Save", mfg, 0x00F0F0F0);
+}
+
 static void ed_draw(window_t *w) {
     uint32_t bg   = 0x00FFFFF8;
     uint32_t fg   = 0x00202020;
     uint32_t lnbg = 0x00E8E8E0;
     uint32_t crbg = 0x00B0D0F0;
 
-    fb_fill_rect(w->x, w->y, w->w, w->h, bg);
+    fb_fill_rect(w->x, w->y + TEXTTOP, w->w, w->h - TEXTTOP, bg);
+
+    draw_menubar(w);
 
     int cur_line = ed_cursor_line();
     int cur_col  = ed_cursor_col();
@@ -144,9 +209,8 @@ static void ed_draw(window_t *w) {
     int pos  = ed_line_start(line);
 
     for (int row = 0; row < ED_ROWS && line < ed_line_count(); row++, line++) {
-        int py = w->y + 4 + row * (FONT_CHAR_HEIGHT + 2);
+        int py = w->y + TEXTTOP + 4 + row * (FONT_CHAR_HEIGHT + 2);
 
-        /* Line number gutter */
         char ln[4];
         int l = line + 1;
         ln[0] = (l >= 100) ? ('0' + (char)(l / 100)) : ' ';
@@ -167,13 +231,12 @@ static void ed_draw(window_t *w) {
             pos++;
         }
 
-        /* Draw cursor at end of line */
         if (line == cur_line && cur_col == col && col < ED_COLS) {
             int px = w->x + 32 + col * FONT_CHAR_WIDTH;
             fb_fill_rect(px, py, FONT_CHAR_WIDTH, FONT_CHAR_HEIGHT, crbg);
         }
 
-        if (pos < es.len) pos++; /* skip newline */
+        if (pos < es.len) pos++;
     }
 
     /* Status bar */
@@ -192,28 +255,72 @@ static void ed_draw(window_t *w) {
     if (es.modified) status[sp++] = '*';
     status[sp++] = ' ';
     status[sp++] = 'L';
-    if (cur_line + 1 >= 10) status[sp++] = '0' + (char)((cur_line + 1) / 10);
+    if (cur_line + 1 >= 100) status[sp++] = '0' + (char)((cur_line + 1) / 100);
+    if (cur_line + 1 >= 10)  status[sp++] = '0' + (char)(((cur_line + 1) / 10) % 10);
     status[sp++] = '0' + (char)((cur_line + 1) % 10);
     status[sp++] = ':';
     status[sp++] = 'C';
     if (cur_col >= 10) status[sp++] = '0' + (char)(cur_col / 10);
     status[sp++] = '0' + (char)(cur_col % 10);
-    status[sp++] = ' ';
-    status[sp++] = ' ';
-    const char *hint = "Ctrl+S save";
-    while (*hint && sp < 60) status[sp++] = *hint++;
     status[sp] = '\0';
 
     font_draw_string(w->x + 8, sy + 2, status, 0x00D0D8E0, 0x00304050);
 }
 
+/* ---- events ---- */
+
+static bool handle_menu_click(int lx, int ly) {
+    /* "File" button hit? */
+    if (ly < MENUBAR_H && lx >= 4 && lx < 44) {
+        es.file_menu_open = !es.file_menu_open;
+        window_set_dirty(ed_win);
+        return true;
+    }
+
+    if (!es.file_menu_open) return false;
+
+    /* Dropdown hit? */
+    if (lx >= FMENU_X && lx < FMENU_X + FMENU_W &&
+        ly >= FMENU_Y && ly < FMENU_Y + FMENU_H) {
+        int idx = (ly - FMENU_Y - 2) / FMENU_ITEM;
+        es.file_menu_open = false;
+        if (idx == 0) ed_new_file();
+        if (idx == 1) ed_save();
+        window_set_dirty(ed_win);
+        return true;
+    }
+
+    /* Click elsewhere closes menu */
+    es.file_menu_open = false;
+    window_set_dirty(ed_win);
+    return false;
+}
+
 static void ed_event(window_t *w, int type, int d1, int d2) {
-    (void)w; (void)d2;
+    (void)w;
+
+    if (type == WIN_EVENT_MOUSE_DOWN) {
+        if (handle_menu_click(d1, d2))
+            return;
+
+        /* Close file menu on any other click */
+        if (es.file_menu_open) {
+            es.file_menu_open = false;
+            window_set_dirty(ed_win);
+        }
+        return;
+    }
 
     if (type == WIN_EVENT_KEY_DOWN) {
         uint8_t sc = (uint8_t)d1;
 
         if (sc == SC_CTRL) { es.ctrl_held = true; return; }
+
+        /* Close file menu on any keystroke */
+        if (es.file_menu_open) {
+            es.file_menu_open = false;
+            window_set_dirty(ed_win);
+        }
 
         if (es.ctrl_held && sc == SC_S) {
             ed_save();
@@ -290,6 +397,8 @@ static void ed_event(window_t *w, int type, int d1, int d2) {
         if (sc == SC_CTRL) es.ctrl_held = false;
     }
 }
+
+/* ---- public ---- */
 
 void app_editor_open_file(const char *path) {
     memset(&es, 0, sizeof(es));

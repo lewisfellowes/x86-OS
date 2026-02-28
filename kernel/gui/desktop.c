@@ -188,11 +188,9 @@ void desktop_handle_event(const event_t *ev) {
     if (ev->type == EVENT_MOUSE_DOWN || ev->type == EVENT_MOUSE_UP ||
         ev->type == EVENT_MOUSE_MOVE ||
         ev->type == EVENT_KEY_DOWN || ev->type == EVENT_KEY_UP) {
-        wm_handle_event(ev);
-    }
-
-    if (ev->type == EVENT_MOUSE_DOWN) {
-        handle_icon_click(ev->mouse.x, ev->mouse.y);
+        bool consumed = wm_handle_event(ev);
+        if (ev->type == EVENT_MOUSE_DOWN && !consumed)
+            handle_icon_click(ev->mouse.x, ev->mouse.y);
     }
 }
 
