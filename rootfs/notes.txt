@@ -1,0 +1,14 @@
+TODO list:
+  [x] Boot sector + stage2 loader
+  [x] IDT, PIC, PIT timer
+  [x] Physical memory manager
+  [x] Paging
+  [x] Kernel heap
+  [x] Framebuffer graphics
+  [x] Font rendering
+  [x] PS/2 mouse driver
+  [x] File manager UI
+  [x] ATA disk driver
+  [x] MyFS filesystem
+  [ ] Window manager
+  [ ] User programs

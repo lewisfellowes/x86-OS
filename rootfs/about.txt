@@ -1,0 +1,8 @@
+My OS v0.3 (C edition)
+A 32-bit x86 operating system
+Built with NASM + i686-elf-gcc
+Running on QEMU/i386
+
+Boot: BIOS MBR -> stage2 -> ELF kernel
+Video: Bochs VGA 640x480x32bpp
+Disk: ATA PIO with MyFS filesystem

@@ -1,0 +1,6 @@
+Hello, World!
+Greetings from 32-bit protected mode!
+
+The CPU is running ring 0 code
+with paging enabled and a real
+on-disk filesystem.

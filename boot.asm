@@ -8,7 +8,7 @@ STAGE2_LOAD_ADDR     equ 0x8000
 KERNEL_ELF_ADDR      equ 0x9000
 
 STAGE2_SECTORS       equ 1
-KERNEL_SECTORS       equ 64
+KERNEL_SECTORS       equ 128
 
 ; -----------------------------
 ; Boot info + memory map layout
